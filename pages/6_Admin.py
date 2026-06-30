@@ -105,6 +105,8 @@ with st.expander("Nuevo usuario", expanded=False):
                     }
                     _guardar_usuarios(users)
                     st.success(f"Usuario **{nu_nombre}** creado como **{nu_rol}**.")
+                    for k in ['nu_user', 'nu_nombre', 'nu_pwd']:
+                        st.session_state.pop(k, None)
                     st.rerun()
 
 # ── Resumen de permisos ───────────────────────────────────────────
