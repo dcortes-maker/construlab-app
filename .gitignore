@@ -1,0 +1,7 @@
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+*.xlsm
+*.xlsx
+migrar_supabase.py
+.DS_Store

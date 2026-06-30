@@ -1,0 +1,18 @@
+[
+  {
+    "id": 2,
+    "nombre": "JOEL CARRION",
+    "unidad": "4-F",
+    "monto": 50.0,
+    "fecha": "2026-06-27",
+    "notas": ""
+  },
+  {
+    "id": 3,
+    "nombre": "NEKELDA ABAD",
+    "unidad": "5-D",
+    "monto": 50.0,
+    "fecha": "2026-06-27",
+    "notas": ""
+  }
+]
