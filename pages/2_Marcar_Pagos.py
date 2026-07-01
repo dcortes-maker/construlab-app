@@ -135,11 +135,12 @@ with tab1:
                 forma_pago=r_forma,
             )
             fname = f"Recibo_{unidad}_{rec['desc'].replace(' ','_')}_{r_fecha.strftime('%Y%m%d')}.pdf"
-            pdf_b64 = base64.b64encode(pdf_bytes).decode()
-            st.markdown(
-                f'<iframe src="data:application/pdf;base64,{pdf_b64}#zoom=page-width" '
-                f'width="100%" height="700" style="border:1px solid #1e2a3a; border-radius:8px; margin-bottom:8px;"></iframe>',
-                unsafe_allow_html=True,
+            st.download_button(
+                label=f"👁️  Ver / Descargar — {rec['desc']}  (${monto_recibo:,.2f})",
+                data=pdf_bytes,
+                file_name=fname,
+                mime="application/pdf",
+                key=f"view_rec_{rec['fila']}",
             )
             st.download_button(
                 label=f"⬇️  Descargar recibo — {rec['desc']}  (${monto_recibo:,.2f})",

@@ -150,15 +150,10 @@ if seccion == "📄 Ver Plan":
             pdf_ec = generar_estado_cuenta(unidad_ec, nombre_ec, filas)
             pdf_b64 = base64.b64encode(pdf_ec).decode()
             fname_ec = f"EstadoCuenta_{unidad_ec}_{date.today().strftime('%Y%m%d')}.pdf"
-            st.markdown(
-                f'<iframe src="data:application/pdf;base64,{pdf_b64}#zoom=page-width" '
-                f'width="100%" height="750" style="border:1px solid #1e2a3a; border-radius:8px;"></iframe>',
-                unsafe_allow_html=True,
-            )
             col_dl, col_cl = st.columns([1, 4])
             with col_dl:
                 st.download_button(
-                    label="⬇️ Descargar PDF",
+                    label="⬇️ Descargar Estado de Cuenta",
                     data=pdf_ec,
                     file_name=fname_ec,
                     mime="application/pdf",
@@ -394,12 +389,7 @@ if seccion == "📁 Documentos":
                     continue
 
                 if ext == "pdf":
-                    b64 = base64.b64encode(file_bytes).decode()
-                    st.markdown(
-                        f'<iframe src="data:application/pdf;base64,{b64}#zoom=page-width" '
-                        f'width="100%" height="750" style="border:1px solid #1e2a3a;border-radius:8px;"></iframe>',
-                        unsafe_allow_html=True,
-                    )
+                    pass  # solo descarga, sin iframe
                 elif ext in ("jpg", "jpeg", "png"):
                     st.image(file_bytes, use_container_width=True)
 
