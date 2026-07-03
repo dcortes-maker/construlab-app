@@ -56,16 +56,16 @@ def _hash(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 def _verificar(usuario, password):
-    # Supabase primero (permite cambio de contraseña)
+    # Secrets primero (admin hardcoded, plain text)
+    admin = st.secrets.get("usuarios", {}).get(usuario)
+    if admin and admin["password"] == password:
+        return admin["nombre"], admin["rol"]
+    # Supabase (usuarios creados desde la app, password hasheada)
     usuarios = _cargar_usuarios()
     if usuario in usuarios:
         u = usuarios[usuario]
         if u["password"] == _hash(password):
             return u["nombre"], u.get("rol", "usuario")
-    # Fallback a secrets (usuarios hardcoded)
-    admin = st.secrets.get("usuarios", {}).get(usuario)
-    if admin and admin["password"] == password:
-        return admin["nombre"], admin["rol"]
     return None, None
 
 def _restaurar_desde_cookie():
