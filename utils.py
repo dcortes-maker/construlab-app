@@ -339,10 +339,26 @@ def eliminar_adjunto(unidad: str, filename: str):
 
 # ─── Generación de PDFs ────────────────────────────────────────────
 
+def siguiente_num_recibo() -> int:
+    """Contador global consecutivo de recibos (inicia en 1020), guardado en Supabase."""
+    sb = _sb()
+    try:
+        row = sb.table('contadores').select('valor').eq('nombre', 'recibo').execute().data
+        if row:
+            nuevo = row[0]['valor'] + 1
+            sb.table('contadores').update({'valor': nuevo}).eq('nombre', 'recibo').execute()
+        else:
+            nuevo = 1020
+            sb.table('contadores').insert({'nombre': 'recibo', 'valor': nuevo}).execute()
+        return nuevo
+    except Exception:
+        return 1020
+
+
 def generar_recibo(nombre: str, unidad: str, desc: str, monto: float,
                    fecha_pago, num_recibo: int, forma_pago: str = 'Transferencia') -> bytes:
     from reportlab.lib.pagesizes import letter
-    from reportlab.lib.units import cm, mm
+    from reportlab.lib.units import cm
     from reportlab.pdfgen import canvas as _canvas
     from reportlab.lib import colors
 
@@ -350,105 +366,83 @@ def generar_recibo(nombre: str, unidad: str, desc: str, monto: float,
     W, H = letter
     c = _canvas.Canvas(buf, pagesize=letter)
 
-    LOGO_PATH = str(Path(__file__).parent / "logo_rp2_0.png")
-    TEAL    = colors.HexColor('#0D5C6E')
-    TEAL_LT = colors.HexColor('#E6F4F7')
-    GRAY    = colors.HexColor('#555555')
-    LGRAY   = colors.HexColor('#EEEEEE')
-    WHITE   = colors.white
-    BLACK   = colors.black
+    LOGO   = str(Path(__file__).parent / "logo_recibo.png")
+    MARCA  = str(Path(__file__).parent / "logo_recibo_marca.png")
+    BLACK  = colors.black
+    RED    = colors.HexColor('#C00000')
 
-    M     = 2.5 * cm
-    box_l = M
-    box_r = W - M
-    box_w = box_r - box_l
+    # ── Logo superior izquierdo ────────────────────────────────────
+    logo_w = 230
+    logo_h = logo_w * 683 / 1024
+    c.drawImage(LOGO, 75, H - 40 - logo_h, width=logo_w, height=logo_h,
+                preserveAspectRatio=True, mask='auto')
 
-    c.setStrokeColor(TEAL); c.setLineWidth(1.5)
-    c.roundRect(box_l - 3*mm, M - 3*mm, box_w + 6*mm, H - 2*M + 6*mm, 5*mm, fill=0, stroke=1)
+    # ── Datos de la empresa (centrado bajo el logo) ────────────────
+    cx_emp = 75 + logo_w / 2
+    c.setFillColor(BLACK); c.setFont("Helvetica", 10)
+    c.drawCentredString(cx_emp, H - 183, "Riviera Park Development S.A.")
+    c.drawCentredString(cx_emp, H - 199, "Las Mañanitas, Ciudad de Panamá")
+    c.drawCentredString(cx_emp, H - 214, "+507 6975-4414 / 375-0404")
+    c.drawCentredString(cx_emp, H - 230, "ventas@gterrabona.com")
 
-    hdr_h = 3.2 * cm
-    c.setFillColor(TEAL)
-    c.rect(box_l, H - M - hdr_h, box_w, hdr_h, fill=1, stroke=0)
+    # ── Título ─────────────────────────────────────────────────────
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(349, H - 150, "RECIBO DE PAGO")
 
-    logo_size = 2.6 * cm
-    c.drawImage(LOGO_PATH, box_l + 0.3*cm, H - M - hdr_h + (hdr_h - logo_size)/2,
-                width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
+    # ── Secciones CLIENTE / RECIBO ─────────────────────────────────
+    c.setFont("Helvetica", 12)
+    c.drawString(90, H - 283, "CLIENTE")
+    c.drawString(306, H - 283, "RECIBO")
 
-    c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 15)
-    c.drawRightString(box_r - 0.5*cm, H - M - 1.35*cm, "RECIBO DE PAGO")
-    fecha_str = fecha_pago.strftime('%d/%m/%Y') if hasattr(fecha_pago, 'strftime') else str(fecha_pago)
-    c.setFont("Helvetica", 8.5); c.setFillColor(colors.HexColor('#A8D5E0'))
-    c.drawRightString(box_r - 0.5*cm, H - M - 1.9*cm, f"Fecha: {fecha_str}")
+    fecha_str = fecha_pago.strftime('%-d/%-m/%Y') if hasattr(fecha_pago, 'strftime') else str(fecha_pago)
+    metodo = {'transferencia': 'ACH', 'efectivo': 'Efectivo', 'cheque': 'Cheque'}.get(
+        forma_pago.lower(), forma_pago)
 
-    badge_y = H - M - hdr_h - 0.4*cm
-    bw, bh  = 3.5*cm, 1.8*cm
-    c.setFillColor(TEAL)
-    c.roundRect(box_l, badge_y - bh, bw, bh, 3*mm, fill=1, stroke=0)
-    c.setFillColor(colors.HexColor('#A8D5E0')); c.setFont("Helvetica", 7)
-    c.drawCentredString(box_l + bw/2, badge_y - 0.65*cm, "N\xb0 DE RECIBO")
-    c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 22)
-    c.drawCentredString(box_l + bw/2, badge_y - 1.5*cm, str(num_recibo).zfill(4))
+    c.setFont("Helvetica", 12)
+    c.drawString(90, H - 323, f"Nombre: {nombre}")
 
-    aw, ah = 5.5*cm, 1.8*cm
-    c.setFillColor(TEAL_LT)
-    c.roundRect(box_r - aw, badge_y - ah, aw, ah, 3*mm, fill=1, stroke=0)
-    c.setStrokeColor(TEAL); c.setLineWidth(1)
-    c.roundRect(box_r - aw, badge_y - ah, aw, ah, 3*mm, fill=0, stroke=1)
-    c.setFillColor(GRAY); c.setFont("Helvetica", 7.5)
-    c.drawCentredString(box_r - aw/2, badge_y - 0.6*cm, "IMPORTE PAGADO")
-    c.setFillColor(TEAL); c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(box_r - aw/2, badge_y - 1.45*cm, f"$ {monto:,.2f}")
+    y = H - 323
+    c.drawString(306, y, "No.: ")
+    c.setFillColor(RED); c.setFont("Helvetica-Bold", 12)
+    c.drawString(306 + c.stringWidth("No.: ", "Helvetica", 12), y, str(num_recibo))
+    c.setFillColor(BLACK); c.setFont("Helvetica", 12)
+    y -= 19.5; c.drawString(306, y, f"Fecha: {fecha_str}")
+    y -= 19.5; c.drawString(306, y, f"Método de pago: {metodo}")
+    y -= 19.5; c.drawString(306, y, "Estado: Pagado")
+    y -= 19.5; c.drawString(306, y, "Moneda: USD")
 
-    def field(label, value, x, y, w, lw=4.2*cm):
-        c.setFillColor(LGRAY)
-        c.rect(x, y - 0.75*cm, lw, 0.75*cm, fill=1, stroke=0)
-        c.setFillColor(GRAY); c.setFont("Helvetica-Bold", 7)
-        c.drawString(x + 2.5*mm, y - 0.48*cm, label)
-        c.setStrokeColor(colors.HexColor('#CCCCCC')); c.setLineWidth(0.5)
-        c.rect(x + lw, y - 0.75*cm, w - lw, 0.75*cm, fill=0, stroke=1)
-        c.setFillColor(BLACK); c.setFont("Helvetica", 9)
-        c.drawString(x + lw + 3*mm, y - 0.48*cm, str(value)[:65])
+    # ── Tabla Descripción / Cantidad / Total ───────────────────────
+    tx0, tx1, tx2, tx3 = 85, 343, 428, 559
+    th_top = H - 443          # borde superior del header
+    th_bot = H - 473          # borde inferior del header
+    tr_bot = H - 501          # borde inferior de la fila de datos
 
-    fy  = badge_y - bh - 0.5*cm
-    rh  = 0.85*cm
-    spl = box_w * 0.62
+    c.setLineWidth(1); c.setStrokeColor(BLACK)
+    for yy in (th_top, th_bot, tr_bot):
+        c.line(tx0, yy, tx3, yy)
+    for xx in (tx0, tx1, tx2, tx3):
+        c.line(xx, th_top, xx, tr_bot)
 
-    field("RECIBIDO DE",          nombre.upper(),     box_l,         fy, spl)
-    field("FECHA DE PAGO",        fecha_str,          box_l+spl+2*mm, fy, box_w-spl-2*mm, lw=3.2*cm)
-    fy -= rh
-    field("APARTAMENTO / UNIDAD", unidad,             box_l,         fy, spl)
-    field("N\xb0 DE RECIBO",      str(num_recibo).zfill(4), box_l+spl+2*mm, fy, box_w-spl-2*mm, lw=3.2*cm)
-    fy -= rh
-    field("CONCEPTO / DESCRIPCION", desc,             box_l,         fy, box_w)
-    fy -= rh
-    field("RECIBIDO POR",         "RIVIERA PARK DEVELOPMENT, S.A.", box_l, fy, box_w)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(tx0 + 5, th_top - 20, "Descripción")
+    c.drawString(tx1 + 6, th_top - 20, "Cantidad")
+    c.drawString(tx2 + 6, th_top - 20, "Total")
 
-    fy -= rh + 0.4*cm
-    c.setFillColor(TEAL); c.setFont("Helvetica-Bold", 8)
-    c.drawString(box_l, fy, "FORMA DE PAGO")
-    c.setStrokeColor(colors.HexColor('#CCCCCC')); c.setLineWidth(0.5)
-    c.line(box_l + 3.5*cm, fy - 0.5*mm + 0.45*cm, box_r, fy - 0.5*mm + 0.45*cm)
+    c.setFont("Helvetica", 12)
+    c.drawString(tx0 + 5, th_bot - 19, f"{desc} — Unidad {unidad}"[:48])
+    c.drawString(tx1 + 6, th_bot - 19, "1")
+    c.drawString(tx2 + 9, th_bot - 19, f"${monto:,.2f}")
 
-    fy -= 0.65*cm
-    for i, metodo in enumerate(["Efectivo", "Transferencia bancaria", "Cheque"]):
-        x       = box_l + i * (box_w / 3)
-        checked = forma_pago.lower() in metodo.lower()
-        c.setStrokeColor(TEAL); c.setLineWidth(1)
-        c.rect(x, fy - 0.4*cm, 0.38*cm, 0.38*cm, fill=0, stroke=1)
-        if checked:
-            c.setFillColor(TEAL)
-            c.rect(x + 0.05*cm, fy - 0.35*cm, 0.28*cm, 0.28*cm, fill=1, stroke=0)
-        c.setFillColor(BLACK); c.setFont("Helvetica", 9.5)
-        c.drawString(x + 0.52*cm, fy - 0.28*cm, metodo)
+    # ── Observaciones ──────────────────────────────────────────────
+    c.setFont("Helvetica", 11)
+    c.drawString(90, H - 564, "Observaciones:")
+    c.drawString(90, H - 595, "_" * 42)
 
-    fy -= rh
-    field("N\xb0 DE CHEQUE / REFERENCIA BANCARIA", "", box_l, fy, box_w)
-
-    c.setFillColor(TEAL)
-    c.rect(box_l, M - 3*mm, box_w, 0.65*cm, fill=1, stroke=0)
-    c.setFillColor(WHITE); c.setFont("Helvetica", 6.5)
-    c.drawCentredString(W/2, M + 0.5*mm,
-        "Comprobante oficial de pago  —  Riviera Park Development, S.A.  —  Proyecto Riviera Park II")
+    # ── Marca de agua inferior derecha ─────────────────────────────
+    wm_w = 354
+    wm_h = wm_w * 683 / 1024
+    c.drawImage(MARCA, 221, 20, width=wm_w, height=wm_h,
+                preserveAspectRatio=True, mask='auto')
 
     c.save()
     buf.seek(0)
@@ -476,7 +470,7 @@ def generar_estado_cuenta(unidad: str, nombre: str, filas: list) -> bytes:
     LGRAY    = colors.HexColor('#F7F7F7')
     WHITE    = colors.white
     BLACK    = colors.black
-    LOGO_PATH = str(Path(__file__).parent / "logo_rp2_0.png")
+    LOGO_PATH = str(Path(__file__).parent / "logo_recibo.png")
 
     hoy   = _date.today()
     M     = 1.8 * cm
@@ -492,18 +486,18 @@ def generar_estado_cuenta(unidad: str, nombre: str, filas: list) -> bytes:
     COLS[1] += avail - sum(COLS)
 
     def draw_header():
-        hdr_h = 2.5*cm
-        c.setFillColor(TEAL)
-        c.rect(M, H - M - hdr_h, avail, hdr_h, fill=1, stroke=0)
-        logo_sz = 2.1*cm
-        c.drawImage(LOGO_PATH, M + 0.2*cm, H - M - hdr_h + (hdr_h - logo_sz)/2,
-                    width=logo_sz, height=logo_sz, preserveAspectRatio=True, mask='auto')
-        c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 13)
-        c.drawString(M + 2.6*cm, H - M - 1.25*cm, "ESTADO DE CUENTA — PLAN DE PAGOS CPP")
-        c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor('#A8D5E0'))
-        c.drawString(M + 2.6*cm, H - M - 1.9*cm, "Proyecto Riviera Park II — Riviera Park Development, S.A.")
-        c.setFillColor(WHITE); c.setFont("Helvetica", 8)
-        c.drawRightString(W - M - 0.4*cm, H - M - 1.25*cm, f"Fecha: {hoy.strftime('%d/%m/%Y')}")
+        hdr_h = 2.8*cm
+        logo_w = 4.2*cm
+        logo_h = logo_w * 683 / 1024
+        c.drawImage(LOGO_PATH, M, H - M - logo_h - 0.1*cm,
+                    width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+        c.setFillColor(BLACK); c.setFont("Helvetica-Bold", 15)
+        c.drawRightString(W - M, H - M - 0.9*cm, "ESTADO DE CUENTA")
+        c.setFillColor(GRAY); c.setFont("Helvetica", 9)
+        c.drawRightString(W - M, H - M - 1.5*cm, "Riviera Park Development S.A.")
+        c.drawRightString(W - M, H - M - 1.9*cm, f"Fecha: {hoy.strftime('%d/%m/%Y')}")
+        c.setStrokeColor(TEAL); c.setLineWidth(1.5)
+        c.line(M, H - M - hdr_h, W - M, H - M - hdr_h)
         return H - M - hdr_h
 
     def draw_table_header(y):

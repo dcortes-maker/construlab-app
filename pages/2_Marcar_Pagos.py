@@ -1,7 +1,7 @@
 import streamlit as st
 import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion, solo_admin
-from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente
+from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente, siguiente_num_recibo
 from datetime import date
 import base64
 
@@ -91,7 +91,8 @@ with tab1:
                     ajustar_monto_siguiente(siguiente['fila'], excedente)
 
             st.session_state['recibos_pendientes'] = [
-                {'fila': f['fila'], 'desc': f['desc'], 'monto': f['monto']}
+                {'fila': f['fila'], 'desc': f['desc'], 'monto': f['monto'],
+                 'num': siguiente_num_recibo()}
                 for f in seleccionadas
             ]
             st.session_state['recibo_monto_real'] = monto_real
@@ -131,7 +132,7 @@ with tab1:
                 desc=rec['desc'],
                 monto=monto_recibo,
                 fecha_pago=r_fecha,
-                num_recibo=rec['fila'],
+                num_recibo=rec.get('num', rec['fila']),
                 forma_pago=r_forma,
             )
             fname = f"Recibo_{unidad}_{rec['desc'].replace(' ','_')}_{r_fecha.strftime('%Y%m%d')}.pdf"
