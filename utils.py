@@ -622,7 +622,7 @@ def generar_estado_cuenta(unidad: str, nombre: str, filas: list) -> bytes:
 def _draw_footer(c, M, avail, W, hoy):
     from reportlab.lib import colors
     TEAL = colors.HexColor('#0D5C6E')
-    from reportlab.lib.units import cm
+    from reportlab.lib.units import cm, mm
     c.setFillColor(TEAL)
     c.rect(M, M, avail, 0.55*cm, fill=1, stroke=0)
     c.setFillColor(colors.white); c.setFont("Helvetica", 6.5)
