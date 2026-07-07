@@ -185,6 +185,7 @@ def desmarcar_pago(record_id: int):
         'forma_pago': None,
         'referencia': None,
     }).eq('id', record_id).execute()
+    anular_recibo(record_id)
     cargar_datos.clear()
 
 
@@ -353,6 +354,34 @@ def siguiente_num_recibo() -> int:
         return nuevo
     except Exception:
         return 1020
+
+
+def registrar_recibo(num: int, cuota_id: int, unidad: str, nombre: str,
+                     desc: str, monto: float, fecha_pago):
+    """Guarda el recibo emitido en Supabase (para trazabilidad y anulación)."""
+    try:
+        _sb().table('recibos').insert({
+            'num':      num,
+            'cuota_id': cuota_id,
+            'unidad':   unidad,
+            'nombre':   nombre,
+            'desc':     desc,
+            'monto':    monto,
+            'fecha':    fecha_pago.isoformat() if hasattr(fecha_pago, 'isoformat') else str(fecha_pago),
+            'estado':   'emitido',
+            'proyecto': _proyecto_db(),
+        }).execute()
+    except Exception:
+        pass
+
+
+def anular_recibo(cuota_id: int):
+    """Marca como ANULADO el recibo emitido de una cuota desmarcada (el número no se reutiliza)."""
+    try:
+        _sb().table('recibos').update({'estado': 'anulado'}) \
+             .eq('cuota_id', cuota_id).eq('estado', 'emitido').execute()
+    except Exception:
+        pass
 
 
 def generar_recibo(nombre: str, unidad: str, desc: str, monto: float,

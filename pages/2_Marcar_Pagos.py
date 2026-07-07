@@ -1,7 +1,7 @@
 import streamlit as st
 import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion, solo_admin
-from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente, siguiente_num_recibo
+from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo
 from datetime import date
 import base64
 
@@ -90,11 +90,14 @@ with tab1:
                 if siguiente and excedente > 0:
                     ajustar_monto_siguiente(siguiente['fila'], excedente)
 
-            st.session_state['recibos_pendientes'] = [
-                {'fila': f['fila'], 'desc': f['desc'], 'monto': f['monto'],
-                 'num': siguiente_num_recibo()}
-                for f in seleccionadas
-            ]
+            recibos_nuevos = []
+            for f in seleccionadas:
+                num = siguiente_num_recibo()
+                registrar_recibo(num, f['fila'], unidad, nombre,
+                                 f['desc'], f['monto'], fecha_pago)
+                recibos_nuevos.append({'fila': f['fila'], 'desc': f['desc'],
+                                       'monto': f['monto'], 'num': num})
+            st.session_state['recibos_pendientes'] = recibos_nuevos
             st.session_state['recibo_monto_real'] = monto_real
             st.session_state['recibo_nombre'] = nombre
             st.session_state['recibo_unidad'] = unidad
