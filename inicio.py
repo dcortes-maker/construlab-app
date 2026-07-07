@@ -1,6 +1,6 @@
 import streamlit as st
 from auth import verificar_login, barra_superior, cerrar_sesion
-from utils import _proyecto_db, cargar_datos, cargar_reservas
+from utils import _proyecto_db, cargar_datos, cargar_reservas, clientes_con_contrato
 
 st.set_page_config(
     page_title="Riviera Park II",
@@ -63,7 +63,8 @@ def kpi(col, label, valor, color="#3b82f6", fmt="número"):
                     letter-spacing:-.02em;'>{v}</div>
     </div>""", unsafe_allow_html=True)
 
-kpi(c1, "Clientes CPP",     k['clientes'],     "#3b82f6")
+con_contrato = clientes_con_contrato(_proyecto_db())
+kpi(c1, "Clientes CPP · Contratos", f"{k['clientes']} · 📄{len(con_contrato)}", "#3b82f6")
 kpi(c2, "Total Cuotas",     k['total_cuotas'], "#6366f1")
 kpi(c3, "Cuotas Pagadas",   k['pagadas'],      "#22c55e")
 kpi(c4, "Cuotas Atrasadas", k['atrasadas'],    "#ef4444")
@@ -87,6 +88,7 @@ for u, nom in datos['clientes']:
     filas.append({
         'Apto': u,
         'Cliente': ('⚠ Sin plan de pagos — ' + nom) if sp else nom,
+        'Contrato': '✓' if u in con_contrato else '✗',
         '# Cuotas': '—' if sp else d.get('n_cuotas', 0),
         'Total Plan': 0 if sp else d.get('total_plan', 0),
         'Separación': sep,
@@ -108,6 +110,7 @@ if df.empty:
 else:
     totales = {
         'Apto': '', 'Cliente': 'TOTAL',
+        'Contrato': '',
         '# Cuotas': df['# Cuotas'].apply(lambda x: x if isinstance(x, int) else 0).sum(),
         'Total Plan':    df['Total Plan'].sum(),
         'Separación':    df['Separación'].sum(),
@@ -129,6 +132,11 @@ else:
                 estilos.append('')
             elif es_total:
                 estilos.append('background-color:#1e2a3a; color:#f1f5f9; font-weight:700; border-top:1px solid #3b82f6')
+            elif col == 'Contrato':
+                if row[col] == '✓':
+                    estilos.append('color:#4ade80; font-weight:700; text-align:center')
+                else:
+                    estilos.append('color:#f87171; font-weight:700; text-align:center')
             elif es_sp:
                 estilos.append('color:#f59e0b; font-weight:600')
             elif col == 'Atrasado' and row[col] > 0:
