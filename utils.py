@@ -311,6 +311,22 @@ def listar_adjuntos(unidad: str) -> list:
         return []
 
 
+@st.cache_data(ttl=60)
+def clientes_con_contrato(proyecto: str = "") -> set:
+    """Unidades con un adjunto cuyo nombre contiene 'contrato' (en Plan de Pagos → Documentos)."""
+    out = set()
+    try:
+        datos = cargar_datos(proyecto)
+        for u, _ in datos['clientes']:
+            for f in listar_adjuntos(u):
+                if 'contrato' in f['name'].lower():
+                    out.add(u)
+                    break
+    except Exception:
+        pass
+    return out
+
+
 def subir_adjunto(unidad: str, filename: str, file_bytes: bytes) -> bool:
     sb     = _sb()
     folder = _folder(unidad)
