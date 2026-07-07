@@ -116,8 +116,9 @@ st.markdown("""
 | Función | 👑 Admin | 👤 Usuario |
 |---|---|---|
 | Ver Inicio / Resumen | ✅ | ✅ |
-| **Marcar pagos + recibos** | ✅ | ❌ |
+| **Marcar pagos** | ✅ | ❌ |
 | **Desmarcar pagos** | ✅ | ❌ |
+| Descargar recibos emitidos | ✅ | ✅ |
 | Ver Plan de Pagos | ✅ | ✅ |
 | Cargar Plan de Pagos | ✅ | ✅ |
 | Descargar Estado de Cuenta | ✅ | ✅ |

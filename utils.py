@@ -385,7 +385,7 @@ def siguiente_num_recibo() -> int:
 
 
 def registrar_recibo(num: int, cuota_id: int, unidad: str, nombre: str,
-                     desc: str, monto: float, fecha_pago):
+                     desc: str, monto: float, fecha_pago, forma: str = ''):
     """Guarda el recibo emitido en Supabase (para trazabilidad y anulación)."""
     try:
         _sb().table('recibos').insert({
@@ -398,9 +398,20 @@ def registrar_recibo(num: int, cuota_id: int, unidad: str, nombre: str,
             'fecha':    fecha_pago.isoformat() if hasattr(fecha_pago, 'isoformat') else str(fecha_pago),
             'estado':   'emitido',
             'proyecto': _proyecto_db(),
+            'forma':    forma,
         }).execute()
     except Exception:
         pass
+
+
+def listar_recibos() -> list:
+    """Recibos del proyecto actual, más recientes primero."""
+    try:
+        return _sb().table('recibos').select('*') \
+                    .eq('proyecto', _proyecto_db()) \
+                    .order('num', desc=True).execute().data or []
+    except Exception:
+        return []
 
 
 def anular_recibo(cuota_id: int):

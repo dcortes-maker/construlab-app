@@ -1,14 +1,56 @@
 import streamlit as st
 import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion, solo_admin
-from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo, pdf_a_imagenes
+from utils import (_proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo,
+                   ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo,
+                   pdf_a_imagenes, listar_recibos)
 from datetime import date
 import base64
 
 st.set_page_config(page_title="Marcar Pagos", page_icon="✅", layout="wide")
 verificar_login()
 barra_superior()
-solo_admin()
+
+
+def seccion_recibos_emitidos():
+    st.markdown("### 🧾 Recibos emitidos")
+    recibos = listar_recibos()
+    if not recibos:
+        st.info("Aún no se han emitido recibos.")
+        return
+    for r in recibos:
+        anulado = r.get('estado') == 'anulado'
+        c1, c2 = st.columns([4, 1.5])
+        with c1:
+            estilo = "color:#f87171;text-decoration:line-through;" if anulado else "color:#f1f5f9;"
+            badge  = " &nbsp;<span style='color:#f87171;font-weight:700;'>ANULADO</span>" if anulado else ""
+            st.markdown(
+                f"<div style='padding-top:6px;{estilo}'>"
+                f"<strong>N° {r['num']}</strong> — {r['nombre']} · {r['unidad']} · "
+                f"{r['desc']} · ${float(r['monto']):,.2f} · {r['fecha']}{badge}</div>",
+                unsafe_allow_html=True)
+        with c2:
+            if not anulado:
+                try:
+                    fecha_r = date.fromisoformat(str(r['fecha']))
+                except Exception:
+                    fecha_r = date.today()
+                pdf_r = generar_recibo(
+                    nombre=r['nombre'], unidad=r['unidad'], desc=r['desc'],
+                    monto=float(r['monto']), fecha_pago=fecha_r,
+                    num_recibo=r['num'], forma_pago=r.get('forma') or 'Transferencia')
+                st.download_button(
+                    "⬇️ Recibo", data=pdf_r,
+                    file_name=f"Recibo_{r['num']}_{r['unidad']}.pdf",
+                    mime="application/pdf", key=f"dl_emit_{r['num']}")
+
+
+es_admin = st.session_state.get('rol') == 'admin'
+if not es_admin:
+    st.markdown("## 🧾 Recibos")
+    st.info("Solo los administradores pueden marcar pagos. Aquí puedes ver y descargar los recibos emitidos.")
+    seccion_recibos_emitidos()
+    st.stop()
 
 datos = cargar_datos(_proyecto_db())
 hoy   = datos['hoy']
@@ -94,7 +136,7 @@ with tab1:
             for f in seleccionadas:
                 num = siguiente_num_recibo()
                 registrar_recibo(num, f['fila'], unidad, nombre,
-                                 f['desc'], f['monto'], fecha_pago)
+                                 f['desc'], f['monto'], fecha_pago, forma_pago)
                 recibos_nuevos.append({'fila': f['fila'], 'desc': f['desc'],
                                        'monto': f['monto'], 'num': num})
             st.session_state['recibos_pendientes'] = recibos_nuevos
@@ -172,6 +214,10 @@ with tab2:
             for f in seleccionadas2:
                 desmarcar_pago(f['fila'])
             n = len(seleccionadas2)
-            st.warning(f"{n} pago(s) desmarcado(s). Los cambios se reflejan al cambiar de cliente o recargar.")
+            st.warning(f"{n} pago(s) desmarcado(s). Sus recibos quedaron ANULADOS. "
+                       "Los cambios se reflejan al cambiar de cliente o recargar.")
             st.stop()
+
+st.markdown("---")
+seccion_recibos_emitidos()
 
