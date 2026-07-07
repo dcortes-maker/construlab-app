@@ -1,7 +1,7 @@
 import streamlit as st
 import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion, solo_admin
-from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo
+from utils import _proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo, ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo, pdf_a_imagenes
 from datetime import date
 import base64
 
@@ -139,13 +139,8 @@ with tab1:
                 forma_pago=r_forma,
             )
             fname = f"Recibo_{unidad}_{rec['desc'].replace(' ','_')}_{r_fecha.strftime('%Y%m%d')}.pdf"
-            st.download_button(
-                label=f"👁️  Ver / Descargar — {rec['desc']}  (${monto_recibo:,.2f})",
-                data=pdf_bytes,
-                file_name=fname,
-                mime="application/pdf",
-                key=f"view_rec_{rec['fila']}",
-            )
+            for pg in pdf_a_imagenes(pdf_bytes):
+                st.image(pg, use_container_width=True)
             st.download_button(
                 label=f"⬇️  Descargar recibo — {rec['desc']}  (${monto_recibo:,.2f})",
                 data=pdf_bytes,

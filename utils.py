@@ -340,6 +340,18 @@ def eliminar_adjunto(unidad: str, filename: str):
 
 # ─── Generación de PDFs ────────────────────────────────────────────
 
+def pdf_a_imagenes(pdf_bytes: bytes, scale: float = 2.0) -> list:
+    """Convierte cada página de un PDF a PNG (para vista previa en la nube)."""
+    import pypdfium2 as pdfium
+    doc = pdfium.PdfDocument(pdf_bytes)
+    paginas = []
+    for page in doc:
+        img = page.render(scale=scale).to_pil()
+        b = io.BytesIO()
+        img.save(b, format='PNG')
+        paginas.append(b.getvalue())
+    return paginas
+
 def siguiente_num_recibo() -> int:
     """Contador global consecutivo de recibos (inicia en 1020), guardado en Supabase."""
     sb = _sb()

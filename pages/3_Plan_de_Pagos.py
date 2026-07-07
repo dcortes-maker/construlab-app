@@ -4,7 +4,8 @@ from auth import verificar_login, barra_superior, cerrar_sesion
 from utils import (_proyecto_db, cargar_datos, agregar_fila_plan, parsear_plan,
                    agregar_filas_plan_bulk, eliminar_plan, generar_estado_cuenta,
                    eliminar_filas_plan, actualizar_fila_plan, cargar_reservas,
-                   listar_adjuntos, subir_adjunto, descargar_adjunto, eliminar_adjunto)
+                   listar_adjuntos, subir_adjunto, descargar_adjunto, eliminar_adjunto,
+                   pdf_a_imagenes)
 from datetime import date
 import pandas as pd
 
@@ -146,10 +147,10 @@ if seccion == "📄 Ver Plan":
             st.session_state['mostrar_ec'] = unidad_ec
 
         if st.session_state.get('mostrar_ec') == unidad_ec:
-            import base64
             pdf_ec = generar_estado_cuenta(unidad_ec, nombre_ec, filas)
-            pdf_b64 = base64.b64encode(pdf_ec).decode()
             fname_ec = f"EstadoCuenta_{unidad_ec}_{date.today().strftime('%Y%m%d')}.pdf"
+            for pg in pdf_a_imagenes(pdf_ec):
+                st.image(pg, use_container_width=True)
             col_dl, col_cl = st.columns([1, 4])
             with col_dl:
                 st.download_button(
@@ -389,7 +390,8 @@ if seccion == "📁 Documentos":
                     continue
 
                 if ext == "pdf":
-                    pass  # solo descarga, sin iframe
+                    for pg in pdf_a_imagenes(file_bytes):
+                        st.image(pg, use_container_width=True)
                 elif ext in ("jpg", "jpeg", "png"):
                     st.image(file_bytes, use_container_width=True)
 

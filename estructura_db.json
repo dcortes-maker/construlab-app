@@ -1,0 +1,80 @@
+{
+  "proyecto": "Riviera Park II — Control de Abonos de Proyectos (ConstruLab)",
+  "base_de_datos": {
+    "motor": "PostgreSQL (Supabase)",
+    "identificador_proyecto": "riviera-park-2",
+    "nota": "El código de la app usa la columna 'descripcion' en la tabla cuotas; el archivo schema_supabase.sql (que dice 'desc') está desactualizado."
+  },
+  "tablas": {
+    "cuotas": {
+      "descripcion": "Tabla principal de pagos de clientes: plan de pagos, cuotas, abonos y bonificaciones por unidad.",
+      "columnas": {
+        "id": { "tipo": "SERIAL", "restricciones": "PRIMARY KEY" },
+        "proyecto": { "tipo": "TEXT", "restricciones": "NOT NULL", "default": "riviera-park-2" },
+        "unidad": { "tipo": "TEXT", "restricciones": "NOT NULL", "descripcion": "Identificador de la unidad/apartamento del cliente" },
+        "nombre": { "tipo": "TEXT", "restricciones": "NOT NULL", "descripcion": "Nombre del cliente" },
+        "num_cuota": { "tipo": "INTEGER", "nullable": true, "descripcion": "Número de cuota dentro del plan de pagos; NULL si no es cuota del plan" },
+        "descripcion": { "tipo": "TEXT", "default": "", "descripcion": "Concepto de la fila: cuota, abono, bonificación, gasto, etc. Un '⚠' marca unidades sin plan" },
+        "fecha_venc": { "tipo": "DATE", "nullable": true, "descripcion": "Fecha de vencimiento de la cuota" },
+        "monto": { "tipo": "NUMERIC(12,2)", "restricciones": "NOT NULL", "default": 0, "descripcion": "Monto en dólares" },
+        "fecha_pago": { "tipo": "DATE", "nullable": true, "descripcion": "Fecha en que se registró el pago; NULL = pendiente" },
+        "forma_pago": { "tipo": "TEXT", "nullable": true, "descripcion": "Método de pago, p. ej. 'Transferencia'" },
+        "referencia": { "tipo": "TEXT", "nullable": true, "descripcion": "Referencia del pago, p. ej. 'Pagado - 05/07/2026'" },
+        "created_at": { "tipo": "TIMESTAMPTZ", "default": "NOW()" }
+      },
+      "indices": ["idx_cuotas_proyecto (proyecto)", "idx_cuotas_unidad (unidad)", "idx_cuotas_fecha_pago (fecha_pago)"],
+      "ejemplo_registro": {
+        "id": 1,
+        "proyecto": "riviera-park-2",
+        "unidad": "A-101",
+        "nombre": "Juan Pérez",
+        "num_cuota": 3,
+        "descripcion": "Cuota 3",
+        "fecha_venc": "2026-08-01",
+        "monto": 1500.00,
+        "fecha_pago": "2026-07-28",
+        "forma_pago": "Transferencia",
+        "referencia": "Pagado - 28/07/2026",
+        "created_at": "2026-07-28T14:32:00Z"
+      }
+    },
+    "reservas": {
+      "descripcion": "Reservas de unidades (separación inicial antes del plan de pagos).",
+      "columnas": {
+        "id": { "tipo": "SERIAL", "restricciones": "PRIMARY KEY" },
+        "proyecto": { "tipo": "TEXT", "restricciones": "NOT NULL", "default": "riviera-park-2" },
+        "nombre": { "tipo": "TEXT", "restricciones": "NOT NULL", "descripcion": "Nombre del cliente" },
+        "unidad": { "tipo": "TEXT", "restricciones": "NOT NULL" },
+        "monto": { "tipo": "NUMERIC(12,2)", "restricciones": "NOT NULL", "default": 0 },
+        "fecha": { "tipo": "TEXT", "nullable": true },
+        "notas": { "tipo": "TEXT", "default": "" },
+        "created_at": { "tipo": "TIMESTAMPTZ", "default": "NOW()" }
+      },
+      "indices": ["idx_reservas_proyecto (proyecto)"],
+      "ejemplo_registro": {
+        "id": 1,
+        "proyecto": "riviera-park-2",
+        "nombre": "María González",
+        "unidad": "B-204",
+        "monto": 1000.00,
+        "fecha": "15/06/2026",
+        "notas": "",
+        "created_at": "2026-06-15T10:00:00Z"
+      }
+    },
+    "usuarios": {
+      "descripcion": "Usuarios del sistema creados desde el panel de administración.",
+      "columnas": {
+        "id": { "tipo": "SERIAL", "restricciones": "PRIMARY KEY" },
+        "username": { "tipo": "TEXT", "restricciones": "UNIQUE NOT NULL" },
+        "nombre": { "tipo": "TEXT", "restricciones": "NOT NULL" },
+        "password_hash": { "tipo": "TEXT", "restricciones": "NOT NULL" },
+        "rol": { "tipo": "TEXT", "restricciones": "NOT NULL", "default": "usuario" },
+        "created_at": { "tipo": "TIMESTAMPTZ", "default": "NOW()" }
+      }
+    }
+  },
+  "seguridad": {
+    "rls": "Deshabilitado en las tres tablas; el acceso se hace con la service_key de Supabase desde la app Streamlit."
+  }
+}
