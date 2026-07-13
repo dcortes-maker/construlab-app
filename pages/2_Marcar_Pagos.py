@@ -48,8 +48,60 @@ def seccion_recibos_emitidos():
 es_admin = st.session_state.get('rol') == 'admin'
 if not es_admin:
     st.markdown("## 🧾 Recibos")
-    st.info("Solo los administradores pueden marcar pagos. Aquí puedes ver y descargar los recibos emitidos.")
-    seccion_recibos_emitidos()
+    st.info("Solo los administradores pueden marcar pagos. "
+            "Selecciona un cliente para ver sus pagos y descargar sus recibos.")
+
+    datos_u = cargar_datos(_proyecto_db())
+    opciones_u = [f"{u} — {n}" for u, n in datos_u['clientes']]
+    if not opciones_u:
+        st.info("Este proyecto aún no tiene clientes con plan de pagos.")
+        st.stop()
+
+    sel_u    = st.selectbox("Selecciona cliente", opciones_u)
+    unidad_u = sel_u.split(" — ")[0]
+    nombre_u = sel_u.split(" — ")[1]
+
+    pagados_u = sorted(
+        [f for f in datos_u['filas']
+         if f['unidad'] == unidad_u and f['fp'] and f['monto'] > 0
+         and 'bonif' not in f['desc'].lower()],
+        key=lambda x: x['fp'])
+
+    if not pagados_u:
+        st.info("Este cliente no tiene pagos marcados aún.")
+        st.stop()
+
+    st.markdown(f"**{len(pagados_u)} pago(s) registrado(s)**")
+    recibos_map = {r['cuota_id']: r for r in listar_recibos()
+                   if r.get('estado') == 'emitido' and r.get('cuota_id')}
+
+    for f in pagados_u:
+        c1, c2 = st.columns([4, 1.5])
+        with c1:
+            st.markdown(
+                f"<div style='padding-top:6px;color:#f1f5f9;'>"
+                f"✅ <strong>{f['desc']}</strong> · ${f['monto']:,.2f} · "
+                f"Pagado: {f['fp'].strftime('%d/%m/%Y')}</div>",
+                unsafe_allow_html=True)
+        with c2:
+            r = recibos_map.get(f['fila'])
+            if r:
+                pdf_r = generar_recibo(
+                    nombre=r['nombre'], unidad=r['unidad'], desc=r['desc'],
+                    monto=float(r['monto']), fecha_pago=f['fp'],
+                    num_recibo=r['num'],
+                    forma_pago=r.get('forma') or f['forma'] or 'Transferencia')
+                st.download_button(
+                    f"⬇️ Recibo N° {r['num']}", data=pdf_r,
+                    file_name=f"Recibo_{r['num']}_{unidad_u}.pdf",
+                    mime="application/pdf", key=f"dl_u_{f['fila']}")
+            else:
+                if st.button("🧾 Generar recibo", key=f"gen_u_{f['fila']}"):
+                    num = siguiente_num_recibo()
+                    registrar_recibo(num, f['fila'], unidad_u, nombre_u,
+                                     f['desc'], f['monto'], f['fp'],
+                                     f['forma'] or 'Transferencia')
+                    st.rerun()
     st.stop()
 
 datos = cargar_datos(_proyecto_db())

@@ -89,6 +89,7 @@ def cargar_datos(proyecto: str = ""):
                 'monto':  float(m),
                 'fp':     fp,
                 'ref':    ref,
+                'forma':  row.get('forma_pago') or '',
             })
 
     clientes = sorted(vistos.items())
