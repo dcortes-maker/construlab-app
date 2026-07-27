@@ -5,7 +5,7 @@ from utils import (_proyecto_db, cargar_datos, agregar_fila_plan, parsear_plan,
                    agregar_filas_plan_bulk, eliminar_plan, generar_estado_cuenta,
                    eliminar_filas_plan, actualizar_fila_plan, cargar_reservas,
                    listar_adjuntos, subir_adjunto, descargar_adjunto, eliminar_adjunto,
-                   pdf_a_imagenes)
+                   pdf_a_imagenes, reordenar_plan)
 from datetime import date
 import pandas as pd
 
@@ -33,7 +33,10 @@ if seccion == "📄 Ver Plan":
         unidad_f = sel.split(" — ")[0]
         filas = [f for f in filas if f['unidad'] == unidad_f]
     filas = [f for f in filas if 'bonif' not in f['desc'].lower()]
-    filas = sorted(filas, key=lambda x: (x['unidad'], x['fv'] or date(2099,1,1)))
+    # Orden: num_cuota manda (permite reordenar manualmente); la fecha desempata.
+    filas = sorted(filas, key=lambda x: (x['unidad'],
+                                         x.get('num_cuota') or 9999,
+                                         x['fv'] or date(2099,1,1)))
 
     # ── Modo edición (solo admin, solo un cliente) ──────────────
     modo_edicion = (st.session_state.get('rol') == 'admin' and
@@ -41,9 +44,14 @@ if seccion == "📄 Ver Plan":
                     st.toggle("✏️ Editar plan", key="toggle_editar"))
 
     if modo_edicion:
-        st.info("Edita directamente en la tabla. Marca las filas a eliminar con el checkbox. "
-                "Para **agregar una cuota**, usa la fila vacía al final de la tabla (deja "
-                "«Fila» en blanco y completa descripción, fecha y monto).")
+        st.info(
+            "Edita directamente en la tabla. Marca las filas a eliminar con el checkbox.\n\n"
+            "**Agregar una cuota:** usa la fila vacía del final (el `+`) y completa "
+            "descripción, fecha y monto.\n\n"
+            "**Colocarla donde quieras:** escribe en **Pos.** el número del lugar que debe "
+            "ocupar. Para insertarla *entre* la 3 y la 4, pon `3.5`. Al guardar, las "
+            "posiciones se renumeran solas."
+        )
         DESCS_ED = ["Reserva","Separación",
                     "I Pago","II Pago","III Pago","IV Pago","V Pago",
                     "VI Pago","VII Pago","VIII Pago","IX Pago","X Pago",
@@ -53,12 +61,13 @@ if seccion == "📄 Ver Plan":
 
         ed_data = pd.DataFrame([{
             'Eliminar':      False,
+            'Pos.':          float(i),
             'Fila':          f['fila'],
             'Descripción':   f['desc'],
             'F. Vencimiento': f['fv'],
             'Monto ($)':     f['monto'],
             'Estado':        '✅ Pagado' if f['fp'] else ('🔴 Atrasado' if f['fv'] and (f['fv'].year, f['fv'].month) < (hoy.year, hoy.month) else '🟡 Pendiente'),
-        } for f in filas])
+        } for i, f in enumerate(filas, 1)])
 
         editado = st.data_editor(
             ed_data,
@@ -67,6 +76,10 @@ if seccion == "📄 Ver Plan":
             num_rows="dynamic",
             column_config={
                 'Eliminar':      st.column_config.CheckboxColumn('🗑', width="small"),
+                'Pos.':          st.column_config.NumberColumn(
+                                     'Pos.', width="small", step=0.5, format="%.1f",
+                                     help="Lugar que ocupa la cuota. Usa decimales "
+                                          "(ej. 3.5) para insertar entre dos filas."),
                 'Fila':          st.column_config.NumberColumn('Fila', disabled=True, width="small"),
                 'Descripción':   st.column_config.SelectboxColumn('Descripción', options=DESCS_ED, width="medium"),
                 'F. Vencimiento': st.column_config.DateColumn('F. Vencimiento', format="DD/MM/YYYY"),
@@ -86,29 +99,29 @@ if seccion == "📄 Ver Plan":
 
                 unidad_ed = sel.split(" — ")[0]
                 nombre_ed = sel.split(" — ")[1]
-                # Siguiente num_cuota libre — sobre TODAS las cuotas del cliente,
-                # incluidas las que la vista filtra (bonificaciones).
-                nums = [f['num_cuota'] for f in datos['filas']
-                        if f['unidad'] == unidad_ed and f.get('num_cuota')]
-                sig_num = (max(nums) if nums else 0) + 1
-                n_nuevas = 0
+                n_nuevas  = 0
+                orden     = []   # (pos, desempate, id) → define el nuevo num_cuota
 
-                for _, row in vivas.iterrows():
-                    es_nueva = pd.isna(row['Fila'])
-                    if es_nueva:
+                for i, (_, row) in enumerate(vivas.iterrows()):
+                    # Sin Pos. escrita, la fila se va al final conservando su orden relativo
+                    pos = float(row['Pos.']) if pd.notna(row['Pos.']) else 1e9
+
+                    if pd.isna(row['Fila']):
                         # Fila agregada en el editor: requiere descripción y monto
                         desc_n  = row['Descripción']
                         monto_n = row['Monto ($)']
                         if not desc_n or pd.isna(monto_n) or float(monto_n) <= 0:
                             continue
                         fecha_n = row['F. Vencimiento'] if pd.notna(row['F. Vencimiento']) else None
-                        agregar_fila_plan(unidad_ed, nombre_ed, sig_num,
-                                          desc_n, fecha_n, float(monto_n))
-                        sig_num  += 1
-                        n_nuevas += 1
+                        nuevo_id = agregar_fila_plan(unidad_ed, nombre_ed, None,
+                                                     desc_n, fecha_n, float(monto_n))
+                        if nuevo_id:
+                            orden.append((pos, i, nuevo_id))
+                            n_nuevas += 1
                         continue
 
-                    fila_orig = next((f for f in filas if f['fila'] == int(row['Fila'])), None)
+                    fid       = int(row['Fila'])
+                    fila_orig = next((f for f in filas if f['fila'] == fid), None)
                     if fila_orig:
                         nueva_desc  = row['Descripción'] or fila_orig['desc']
                         nueva_fecha = row['F. Vencimiento'] if pd.notna(row['F. Vencimiento']) else fila_orig['fv']
@@ -116,7 +129,13 @@ if seccion == "📄 Ver Plan":
                         if (nueva_desc != fila_orig['desc'] or
                                 nueva_fecha != fila_orig['fv'] or
                                 nuevo_monto != fila_orig['monto']):
-                            actualizar_fila_plan(int(row['Fila']), nueva_desc, nueva_fecha, nuevo_monto)
+                            actualizar_fila_plan(fid, nueva_desc, nueva_fecha, nuevo_monto)
+                        orden.append((pos, i, fid))
+
+                # Renumera num_cuota según las posiciones indicadas
+                orden.sort(key=lambda t: (t[0], t[1]))
+                if orden:
+                    reordenar_plan([t[2] for t in orden])
 
                 msg = "Cambios guardados."
                 if n_nuevas:

@@ -288,13 +288,23 @@ def eliminar_plan(unidad: str):
 
 
 def agregar_fila_plan(unidad: str, nombre: str, num_cuota, desc: str, fecha_venc, monto: float):
+    """Inserta una cuota y retorna el id creado (o None si falla)."""
     rec = {
         'proyecto': _proyecto_db(), 'unidad': unidad, 'nombre': nombre,
         'num_cuota': num_cuota, 'descripcion': desc, 'monto': monto,
     }
     if fecha_venc:
         rec['fecha_venc'] = fecha_venc.isoformat() if hasattr(fecha_venc, 'isoformat') else str(fecha_venc)
-    _sb().table('cuotas').insert(rec).execute()
+    res = _sb().table('cuotas').insert(rec).execute()
+    cargar_datos.clear()
+    return res.data[0]['id'] if res.data else None
+
+
+def reordenar_plan(ids_en_orden: list):
+    """Renumera num_cuota = 1..N siguiendo el orden de los ids recibidos."""
+    sb = _sb()
+    for pos, cid in enumerate(ids_en_orden, 1):
+        sb.table('cuotas').update({'num_cuota': pos}).eq('id', int(cid)).execute()
     cargar_datos.clear()
 
 
