@@ -190,6 +190,45 @@ def desmarcar_pago(record_id: int):
     cargar_datos.clear()
 
 
+def pago_parcial(record_id: int, monto_pagado: float, fecha_pago: date,
+                 forma_pago: str = 'Transferencia') -> float:
+    """Abono menor a la cuota: marca lo pagado y deja el saldo restante como cuota pendiente.
+
+    La fila original queda con el monto abonado y marcada como pagada; se crea una
+    fila nueva con el saldo (misma unidad, cuota y fecha de vencimiento).
+    Retorna el saldo que quedó pendiente.
+    """
+    sb  = _sb()
+    row = sb.table('cuotas').select('*').eq('id', record_id).execute().data
+    if not row:
+        return 0.0
+    r      = row[0]
+    total  = float(r['monto'])
+    pagado = round(min(monto_pagado, total), 2)
+    saldo  = round(total - pagado, 2)
+
+    sb.table('cuotas').update({
+        'monto':      pagado,
+        'fecha_pago': fecha_pago.isoformat(),
+        'forma_pago': forma_pago,
+        'referencia': f"Abono parcial - {fecha_pago.strftime('%d/%m/%Y')}",
+    }).eq('id', record_id).execute()
+
+    if saldo > 0:
+        sb.table('cuotas').insert({
+            'proyecto':    r['proyecto'],
+            'unidad':      r['unidad'],
+            'nombre':      r['nombre'],
+            'num_cuota':   r['num_cuota'],
+            'descripcion': f"{r['descripcion']} (saldo)",
+            'fecha_venc':  r['fecha_venc'],
+            'monto':       saldo,
+        }).execute()
+
+    cargar_datos.clear()
+    return saldo
+
+
 def ajustar_monto_siguiente(record_id: int, excedente: float):
     sb  = _sb()
     row = sb.table('cuotas').select('monto').eq('id', record_id).execute().data

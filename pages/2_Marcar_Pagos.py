@@ -3,7 +3,7 @@ import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion, solo_admin
 from utils import (_proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo,
                    ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo,
-                   pdf_a_imagenes, listar_recibos)
+                   pdf_a_imagenes, listar_recibos, pago_parcial)
 from datetime import date
 import base64
 
@@ -151,13 +151,14 @@ with tab1:
                 value=float(total_sel),
                 step=0.01,
                 format="%.2f",
-                help="Por defecto es la suma de las cuotas seleccionadas. Si el cliente pagó más, el excedente se descuenta de la siguiente cuota pendiente.",
+                help="Por defecto es la suma de las cuotas seleccionadas. Si pagó de más, "
+                     "el excedente se descuenta de la siguiente cuota. Si pagó de menos, "
+                     "se abona a la cuota y el saldo restante queda pendiente.",
             )
         with col_m2:
+            filas_sel_nums = {f['fila'] for f in seleccionadas}
             if len(seleccionadas) > 0 and monto_real > total_sel:
                 excedente = monto_real - total_sel
-                # Find next pending after selected
-                filas_sel_nums = {f['fila'] for f in seleccionadas}
                 siguiente = next(
                     (f for f in pendientes if f['fila'] not in filas_sel_nums),
                     None
@@ -167,32 +168,54 @@ with tab1:
                             f"_{siguiente['desc']}_ (${siguiente['monto']:,.2f} → **${max(0, siguiente['monto']-excedente):,.2f}**)")
                 else:
                     st.info(f"Excedente **${excedente:,.2f}** — no hay cuota siguiente a descontar.")
+            elif len(seleccionadas) > 0 and monto_real < total_sel:
+                restante = monto_real
+                detalle  = []
+                for f in seleccionadas:
+                    if restante >= f['monto']:
+                        detalle.append(f"✅ _{f['desc']}_ — pagada completa (${f['monto']:,.2f})")
+                        restante -= f['monto']
+                    elif restante > 0:
+                        detalle.append(f"🟡 _{f['desc']}_ — abono de **${restante:,.2f}**, "
+                                       f"queda saldo pendiente de **${f['monto']-restante:,.2f}**")
+                        restante = 0
+                    else:
+                        detalle.append(f"⚪ _{f['desc']}_ — sin abono, queda pendiente")
+                st.warning("**Pago parcial:**\n\n" + "\n\n".join(detalle))
 
         if st.button("✅ Marcar seleccionados como Pagados", type="primary",
                      disabled=len(seleccionadas) == 0):
+            # Reparte el monto recibido entre las cuotas seleccionadas, en orden.
+            restante       = monto_real
+            recibos_nuevos = []
             for f in seleccionadas:
-                marcar_pago(f['fila'], fecha_pago, forma_pago)
+                if restante >= f['monto']:
+                    abonado = f['monto']
+                    marcar_pago(f['fila'], fecha_pago, forma_pago)
+                elif restante > 0:
+                    abonado = round(restante, 2)
+                    pago_parcial(f['fila'], abonado, fecha_pago, forma_pago)
+                else:
+                    break  # ya no queda dinero por repartir
+                restante = round(restante - abonado, 2)
 
-            # Aplicar excedente a la siguiente cuota
-            if monto_real > total_sel:
-                excedente = monto_real - total_sel
+                num = siguiente_num_recibo()
+                registrar_recibo(num, f['fila'], unidad, nombre,
+                                 f['desc'], abonado, fecha_pago, forma_pago)
+                recibos_nuevos.append({'fila': f['fila'], 'desc': f['desc'],
+                                       'monto': abonado, 'num': num})
+
+            # Sobrante: se descuenta de la siguiente cuota pendiente
+            if restante > 0:
                 filas_sel_nums = {f['fila'] for f in seleccionadas}
                 siguiente = next(
                     (f for f in pendientes if f['fila'] not in filas_sel_nums),
                     None
                 )
-                if siguiente and excedente > 0:
-                    ajustar_monto_siguiente(siguiente['fila'], excedente)
+                if siguiente:
+                    ajustar_monto_siguiente(siguiente['fila'], restante)
 
-            recibos_nuevos = []
-            for f in seleccionadas:
-                num = siguiente_num_recibo()
-                registrar_recibo(num, f['fila'], unidad, nombre,
-                                 f['desc'], f['monto'], fecha_pago, forma_pago)
-                recibos_nuevos.append({'fila': f['fila'], 'desc': f['desc'],
-                                       'monto': f['monto'], 'num': num})
             st.session_state['recibos_pendientes'] = recibos_nuevos
-            st.session_state['recibo_monto_real'] = monto_real
             st.session_state['recibo_nombre'] = nombre
             st.session_state['recibo_unidad'] = unidad
             st.session_state['recibo_fecha']  = fecha_pago
@@ -205,23 +228,14 @@ with tab1:
         st.success(f"{len(st.session_state['recibos_pendientes'])} pago(s) marcado(s) correctamente.")
         st.markdown("---")
         st.markdown("#### 🧾 Recibos generados")
-        recs         = st.session_state['recibos_pendientes']
-        r_nombre     = st.session_state['recibo_nombre']
-        r_fecha      = st.session_state['recibo_fecha']
-        r_forma      = st.session_state['recibo_forma']
-        r_monto_real = st.session_state.get('recibo_monto_real')
+        recs     = st.session_state['recibos_pendientes']
+        r_nombre = st.session_state['recibo_nombre']
+        r_fecha  = st.session_state['recibo_fecha']
+        r_forma  = st.session_state['recibo_forma']
 
-        # Si hay un solo recibo y se pagó un monto real diferente, usarlo en el recibo
-        monto_nominal = sum(r['monto'] for r in recs)
-        for i, rec in enumerate(recs):
-            # Distribute monto_real proportionally if multiple quotas; for single quota use directly
-            if r_monto_real is not None and len(recs) == 1:
-                monto_recibo = r_monto_real
-            elif r_monto_real is not None and len(recs) > 1:
-                # Proportional split
-                monto_recibo = round(r_monto_real * (rec['monto'] / monto_nominal), 2) if monto_nominal else rec['monto']
-            else:
-                monto_recibo = rec['monto']
+        for rec in recs:
+            # El monto ya es el realmente abonado a esa cuota
+            monto_recibo = rec['monto']
 
             pdf_bytes = generar_recibo(
                 nombre=r_nombre,
@@ -243,7 +257,7 @@ with tab1:
                 key=f"dl_rec_{rec['fila']}",
             )
         if st.button("Cerrar recibos", key="clear_recs"):
-            for k in ['recibos_pendientes','recibo_nombre','recibo_unidad','recibo_fecha','recibo_forma','recibo_monto_real']:
+            for k in ['recibos_pendientes','recibo_nombre','recibo_unidad','recibo_fecha','recibo_forma']:
                 st.session_state.pop(k, None)
             st.rerun()
 
