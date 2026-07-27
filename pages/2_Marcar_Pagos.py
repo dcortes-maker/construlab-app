@@ -12,6 +12,16 @@ verificar_login()
 barra_superior()
 
 
+def _emitir_recibo(cuota_id, unidad, nombre, desc, monto, fecha, forma):
+    """Consume el siguiente N° consecutivo y registra el recibo.
+
+    Se llama solo al emitir, nunca al marcar el pago: así marcar y desmarcar
+    sin emitir no gasta números de la secuencia.
+    """
+    num = siguiente_num_recibo()
+    registrar_recibo(num, cuota_id, unidad, nombre, desc, monto, fecha, forma)
+
+
 def seccion_recibos_emitidos():
     st.markdown("### 🧾 Recibos emitidos")
     recibos = listar_recibos()
@@ -96,12 +106,10 @@ if not es_admin:
                     file_name=f"Recibo_{r['num']}_{unidad_u}.pdf",
                     mime="application/pdf", key=f"dl_u_{f['fila']}")
             else:
-                if st.button("🧾 Generar recibo", key=f"gen_u_{f['fila']}"):
-                    num = siguiente_num_recibo()
-                    registrar_recibo(num, f['fila'], unidad_u, nombre_u,
-                                     f['desc'], f['monto'], f['fp'],
-                                     f['forma'] or 'Transferencia')
-                    st.rerun()
+                st.button("🧾 Emitir recibo", key=f"gen_u_{f['fila']}",
+                          on_click=_emitir_recibo,
+                          args=(f['fila'], unidad_u, nombre_u, f['desc'],
+                                f['monto'], f['fp'], f['forma'] or 'Transferencia'))
     st.stop()
 
 datos = cargar_datos(_proyecto_db())
@@ -199,11 +207,10 @@ with tab1:
                     break  # ya no queda dinero por repartir
                 restante = round(restante - abonado, 2)
 
-                num = siguiente_num_recibo()
-                registrar_recibo(num, f['fila'], unidad, nombre,
-                                 f['desc'], abonado, fecha_pago, forma_pago)
+                # El N° de recibo NO se asigna aquí: se consume al emitir el recibo,
+                # para que marcar y desmarcar un pago no queme números.
                 recibos_nuevos.append({'fila': f['fila'], 'desc': f['desc'],
-                                       'monto': abonado, 'num': num})
+                                       'monto': abonado})
 
             # Sobrante: se descuenta de la siguiente cuota pendiente
             if restante > 0:
@@ -227,15 +234,29 @@ with tab1:
             st.session_state.get('recibos_pendientes')):
         st.success(f"{len(st.session_state['recibos_pendientes'])} pago(s) marcado(s) correctamente.")
         st.markdown("---")
-        st.markdown("#### 🧾 Recibos generados")
+        st.markdown("#### 🧾 Recibos")
+        st.caption("El N° de recibo se asigna al emitirlo, no al marcar el pago.")
         recs     = st.session_state['recibos_pendientes']
         r_nombre = st.session_state['recibo_nombre']
         r_fecha  = st.session_state['recibo_fecha']
         r_forma  = st.session_state['recibo_forma']
 
+        emitidos = {r['cuota_id']: r for r in listar_recibos()
+                    if r.get('estado') == 'emitido' and r.get('cuota_id')}
+
         for rec in recs:
-            # El monto ya es el realmente abonado a esa cuota
             monto_recibo = rec['monto']
+            ya = emitidos.get(rec['fila'])
+
+            if not ya:
+                st.button(
+                    f"🧾 Emitir recibo — {rec['desc']}  (${monto_recibo:,.2f})",
+                    key=f"emitir_{rec['fila']}",
+                    on_click=_emitir_recibo,
+                    args=(rec['fila'], unidad, r_nombre, rec['desc'],
+                          monto_recibo, r_fecha, r_forma),
+                )
+                continue
 
             pdf_bytes = generar_recibo(
                 nombre=r_nombre,
@@ -243,14 +264,14 @@ with tab1:
                 desc=rec['desc'],
                 monto=monto_recibo,
                 fecha_pago=r_fecha,
-                num_recibo=rec.get('num', rec['fila']),
+                num_recibo=ya['num'],
                 forma_pago=r_forma,
             )
-            fname = f"Recibo_{unidad}_{rec['desc'].replace(' ','_')}_{r_fecha.strftime('%Y%m%d')}.pdf"
+            fname = f"Recibo_{ya['num']}_{unidad}.pdf"
             for pg in pdf_a_imagenes(pdf_bytes):
                 st.image(pg, use_container_width=True)
             st.download_button(
-                label=f"⬇️  Descargar recibo — {rec['desc']}  (${monto_recibo:,.2f})",
+                label=f"⬇️  Descargar recibo N° {ya['num']} — {rec['desc']}  (${monto_recibo:,.2f})",
                 data=pdf_bytes,
                 file_name=fname,
                 mime="application/pdf",
