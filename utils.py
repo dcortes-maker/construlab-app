@@ -517,8 +517,29 @@ def generar_recibo(nombre: str, unidad: str, desc: str, monto: float,
     metodo = {'transferencia': 'ACH', 'efectivo': 'Efectivo', 'cheque': 'Cheque'}.get(
         forma_pago.lower(), forma_pago)
 
+    # El nombre se envuelve en varias líneas para no invadir la columna RECIBO (x=306).
     c.setFont("Helvetica", 12)
-    c.drawString(90, H - 323, f"Nombre: {nombre}")
+    ANCHO_NOMBRE = 306 - 90 - 12          # margen de seguridad antes del N° de recibo
+    etiqueta     = "Nombre: "
+    disponible   = ANCHO_NOMBRE - c.stringWidth(etiqueta, "Helvetica", 12)
+
+    lineas, actual = [], ""
+    for palabra in str(nombre).split():
+        prueba = f"{actual} {palabra}".strip()
+        ancho  = c.stringWidth(prueba, "Helvetica", 12)
+        limite = disponible if not lineas else ANCHO_NOMBRE
+        if actual and ancho > limite:
+            lineas.append(actual)
+            actual = palabra
+        else:
+            actual = prueba
+    if actual:
+        lineas.append(actual)
+
+    yn = H - 323
+    for i, ln in enumerate(lineas):
+        c.drawString(90, yn, f"{etiqueta}{ln}" if i == 0 else ln)
+        yn -= 16
 
     y = H - 323
     c.drawString(306, y, "No.: ")
