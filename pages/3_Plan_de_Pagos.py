@@ -41,7 +41,9 @@ if seccion == "📄 Ver Plan":
                     st.toggle("✏️ Editar plan", key="toggle_editar"))
 
     if modo_edicion:
-        st.info("Edita directamente en la tabla. Marca las filas a eliminar con el checkbox.")
+        st.info("Edita directamente en la tabla. Marca las filas a eliminar con el checkbox. "
+                "Para **agregar una cuota**, usa la fila vacía al final de la tabla (deja "
+                "«Fila» en blanco y completa descripción, fecha y monto).")
         DESCS_ED = ["Reserva","Separación",
                     "I Pago","II Pago","III Pago","IV Pago","V Pago",
                     "VI Pago","VII Pago","VIII Pago","IX Pago","X Pago",
@@ -62,6 +64,7 @@ if seccion == "📄 Ver Plan":
             ed_data,
             use_container_width=True,
             hide_index=True,
+            num_rows="dynamic",
             column_config={
                 'Eliminar':      st.column_config.CheckboxColumn('🗑', width="small"),
                 'Fila':          st.column_config.NumberColumn('Fila', disabled=True, width="small"),
@@ -76,11 +79,35 @@ if seccion == "📄 Ver Plan":
         col_g, col_e = st.columns([1, 1])
         with col_g:
             if st.button("💾 Guardar cambios", type="primary", use_container_width=True):
-                a_eliminar = editado[editado['Eliminar'] == True]['Fila'].tolist()
+                vivas      = editado[editado['Eliminar'] != True]
+                a_eliminar = editado[editado['Eliminar'] == True]['Fila'].dropna().tolist()
                 if a_eliminar:
                     eliminar_filas_plan([int(f) for f in a_eliminar])
-                # Actualizar filas no eliminadas
-                for _, row in editado[editado['Eliminar'] != True].iterrows():
+
+                unidad_ed = sel.split(" — ")[0]
+                nombre_ed = sel.split(" — ")[1]
+                # Siguiente num_cuota libre — sobre TODAS las cuotas del cliente,
+                # incluidas las que la vista filtra (bonificaciones).
+                nums = [f['num_cuota'] for f in datos['filas']
+                        if f['unidad'] == unidad_ed and f.get('num_cuota')]
+                sig_num = (max(nums) if nums else 0) + 1
+                n_nuevas = 0
+
+                for _, row in vivas.iterrows():
+                    es_nueva = pd.isna(row['Fila'])
+                    if es_nueva:
+                        # Fila agregada en el editor: requiere descripción y monto
+                        desc_n  = row['Descripción']
+                        monto_n = row['Monto ($)']
+                        if not desc_n or pd.isna(monto_n) or float(monto_n) <= 0:
+                            continue
+                        fecha_n = row['F. Vencimiento'] if pd.notna(row['F. Vencimiento']) else None
+                        agregar_fila_plan(unidad_ed, nombre_ed, sig_num,
+                                          desc_n, fecha_n, float(monto_n))
+                        sig_num  += 1
+                        n_nuevas += 1
+                        continue
+
                     fila_orig = next((f for f in filas if f['fila'] == int(row['Fila'])), None)
                     if fila_orig:
                         nueva_desc  = row['Descripción'] or fila_orig['desc']
@@ -90,10 +117,16 @@ if seccion == "📄 Ver Plan":
                                 nueva_fecha != fila_orig['fv'] or
                                 nuevo_monto != fila_orig['monto']):
                             actualizar_fila_plan(int(row['Fila']), nueva_desc, nueva_fecha, nuevo_monto)
-                st.success("Cambios guardados.")
+
+                msg = "Cambios guardados."
+                if n_nuevas:
+                    msg += f" Se agregó {n_nuevas} cuota(s) nueva(s)."
+                st.success(msg)
                 st.rerun()
         with col_e:
-            st.caption(f"{len(editado[editado['Eliminar']==True])} fila(s) marcada(s) para eliminar")
+            n_del   = len(editado[editado['Eliminar'] == True])
+            n_nuevo = int(editado['Fila'].isna().sum())
+            st.caption(f"{n_del} fila(s) a eliminar · {n_nuevo} fila(s) nueva(s) por guardar")
 
     else:
         # Vista normal (solo lectura)
