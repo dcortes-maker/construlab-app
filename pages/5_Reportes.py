@@ -43,9 +43,11 @@ def _money(ws, row, col, val):
     return c
 
 def _autowidth(ws):
-    for col in ws.columns:
-        max_len = max((len(str(c.value or '')) for c in col), default=8)
-        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
+    from openpyxl.utils import get_column_letter
+    for idx, col in enumerate(ws.columns, 1):
+        # Las celdas fusionadas (MergedCell) no tienen column_letter; se ignoran para el ancho.
+        max_len = max((len(str(c.value)) for c in col if c.value is not None), default=8)
+        ws.column_dimensions[get_column_letter(idx)].width = min(max_len + 4, 50)
 
 # ── Generadores ────────────────────────────────────────────────────
 def reporte_resumen():
