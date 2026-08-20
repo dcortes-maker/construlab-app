@@ -5,7 +5,7 @@ from utils import (_proyecto_db, cargar_datos, agregar_fila_plan, parsear_plan,
                    agregar_filas_plan_bulk, eliminar_plan, generar_estado_cuenta,
                    eliminar_filas_plan, actualizar_fila_plan, cargar_reservas,
                    listar_adjuntos, subir_adjunto, descargar_adjunto, eliminar_adjunto,
-                   pdf_a_imagenes, reordenar_plan)
+                   pdf_a_imagenes, reordenar_plan, extraer_datos_cliente)
 from datetime import date
 import pandas as pd
 
@@ -233,6 +233,15 @@ if seccion == "📎 Cargar Plan de Pago":
 
     sin_plan = datos.get('sin_plan', set())
 
+    # Datos que trae el propio archivo (nombre y unidad), si ya fue subido.
+    det = {}
+    if 'pdf_bytes' in st.session_state:
+        if st.session_state.get('pdf_det_de') != st.session_state.get('pdf_fname'):
+            st.session_state['pdf_det'] = extraer_datos_cliente(
+                st.session_state['pdf_bytes'], st.session_state.get('pdf_fname', ''))
+            st.session_state['pdf_det_de'] = st.session_state.get('pdf_fname')
+        det = st.session_state.get('pdf_det') or {}
+
     st.markdown("#### 1. Selecciona el cliente")
     col1, col2 = st.columns(2)
     with col1:
@@ -269,10 +278,21 @@ if seccion == "📎 Cargar Plan de Pago":
             st.warning(f"⚠ **{nombre_pdf}** no tiene plan completo. Carga el documento para completarlo.")
         elif unidad_pdf in unidades_reserva:
             st.info(f"🔖 **{nombre_pdf}** está en reserva. Al cargar el plan pasará a CPP.")
+        if det.get('unidad') and det['unidad'] != unidad_pdf.upper():
+            st.warning(f"⚠ El archivo dice unidad **{det['unidad']}**"
+                       + (f" ({det['nombre']})" if det.get('nombre') else "")
+                       + f", pero seleccionaste **{unidad_pdf}**. Verifica antes de guardar.")
     else:
+        # Precarga desde el archivo (solo si el campo está vacío; se puede corregir a mano)
+        if det.get('nombre') and not st.session_state.get('nom_pdf'):
+            st.session_state['nom_pdf'] = det['nombre']
+        if det.get('unidad') and not st.session_state.get('uni_pdf'):
+            st.session_state['uni_pdf'] = det['unidad']
         with col1:
             nombre_pdf = st.text_input("Nombre del cliente", key="nom_pdf").strip().upper()
             unidad_pdf = st.text_input("Apartamento (ej: 3-B)", key="uni_pdf").strip().upper()
+            if det.get('nombre') or det.get('unidad'):
+                st.caption("✨ Datos tomados del archivo — puedes corregirlos.")
 
     st.markdown("#### 2. Sube el archivo del plan")
     st.caption("PDF (ANEXO nuevo o ANEXO 1 de control de pagos) · Excel (.xlsx, .xls). "
@@ -370,13 +390,13 @@ if seccion == "📎 Cargar Plan de Pago":
                     fname_orig = st.session_state.get('pdf_fname', 'plan_de_pagos')
                     subir_adjunto(unidad_prev, f"Plan_de_Pagos_{fname_orig}",
                                   st.session_state['pdf_bytes'])
-                    for k in ['pdf_filas','pdf_unidad','pdf_nombre','pdf_error','pdf_bytes','pdf_fname']:
+                    for k in ['pdf_filas','pdf_unidad','pdf_nombre','pdf_error','pdf_bytes','pdf_fname','pdf_det','pdf_det_de']:
                         st.session_state.pop(k, None)
                     st.session_state['plan_guardado'] = f"✅ Plan de {nombre_prev} guardado correctamente."
                     st.rerun()
             with col_b:
                 if st.button("❌ Cancelar"):
-                    for k in ['pdf_filas','pdf_unidad','pdf_nombre','pdf_error','pdf_bytes','pdf_fname']:
+                    for k in ['pdf_filas','pdf_unidad','pdf_nombre','pdf_error','pdf_bytes','pdf_fname','pdf_det','pdf_det_de']:
                         st.session_state.pop(k, None)
                     st.rerun()
 

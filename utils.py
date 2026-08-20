@@ -741,6 +741,41 @@ def _draw_footer(c, M, avail, W, hoy):
         f"Riviera Park Development, S.A.  —  Proyecto Riviera Park II  —  Generado el {hoy.strftime('%d/%m/%Y')}")
 
 
+def extraer_datos_cliente(archivo_bytes, nombre_archivo: str) -> dict:
+    """Lee nombre y unidad del ANEXO (ambos formatos). Devuelve {} si no los halla."""
+    import re
+    if not str(nombre_archivo).lower().endswith('.pdf'):
+        return {}
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(archivo_bytes)) as pdf:
+            texto = '\n'.join((pg.extract_text() or '') for pg in pdf.pages)
+    except Exception:
+        return {}
+    if not texto.strip():
+        return {}
+
+    out = {}
+
+    # Unidad: "Unidad 4-H – T1 – F1" (anexo nuevo) o "Unidad: 3-C" (anexo de tabla)
+    mu = re.search(r'Unidad:?\s*([A-Za-z]{0,2}\d{0,2}[A-Za-z]?[-–]?[A-Za-z0-9]+)', texto)
+    if mu:
+        out['unidad'] = mu.group(1).strip().upper().replace('–', '-')
+
+    # Nombre del comprador, en sus distintas variantes
+    for patron in (r'Comprador\s*1\s+(.+?)\s+(?:Tel[eé]fono|C[eé]dula|Email)',
+                   r'Persona a notificar:\s*(.+)',
+                   r'Persona a\s+(.+?)\s*\n\s*notificar:'):
+        mn = re.search(patron, texto)
+        if mn:
+            nom = re.sub(r'\s+', ' ', mn.group(1)).strip(' :').upper()
+            if nom:
+                out['nombre'] = nom
+            break
+
+    return out
+
+
 # ─── parsear_plan — sin cambios (procesa archivos subidos) ─────────
 
 def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
