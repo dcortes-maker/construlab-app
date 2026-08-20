@@ -5,7 +5,8 @@ from utils import (_proyecto_db, cargar_datos, agregar_fila_plan, parsear_plan,
                    agregar_filas_plan_bulk, eliminar_plan, generar_estado_cuenta,
                    eliminar_filas_plan, actualizar_fila_plan, cargar_reservas,
                    listar_adjuntos, subir_adjunto, descargar_adjunto, eliminar_adjunto,
-                   pdf_a_imagenes, reordenar_plan, extraer_datos_cliente)
+                   pdf_a_imagenes, reordenar_plan, extraer_datos_cliente,
+                   migrar_reserva_a_plan)
 from datetime import date
 import pandas as pd
 
@@ -387,12 +388,20 @@ if seccion == "📎 Cargar Plan de Pago":
             with col_a:
                 if st.button("✅ Guardar plan", type="primary", use_container_width=True):
                     agregar_filas_plan_bulk(unidad_prev, nombre_prev, filas_a_guardar)
+                    # Si venía de reserva: marca la cuota "Reserva" como pagada
+                    # y saca el registro de reservas (evita contar el dinero dos veces).
+                    mig = migrar_reserva_a_plan(unidad_prev)
                     fname_orig = st.session_state.get('pdf_fname', 'plan_de_pagos')
                     subir_adjunto(unidad_prev, f"Plan_de_Pagos_{fname_orig}",
                                   st.session_state['pdf_bytes'])
                     for k in ['pdf_filas','pdf_unidad','pdf_nombre','pdf_error','pdf_bytes','pdf_fname','pdf_det','pdf_det_de']:
                         st.session_state.pop(k, None)
-                    st.session_state['plan_guardado'] = f"✅ Plan de {nombre_prev} guardado correctamente."
+                    msg_ok = f"✅ Plan de {nombre_prev} guardado correctamente."
+                    if mig:
+                        msg_ok += (f" Su reserva de ${mig['monto']:,.2f} pasó a CPP"
+                                   + (" y la cuota de Reserva quedó marcada como pagada."
+                                      if mig['marcada'] else "."))
+                    st.session_state['plan_guardado'] = msg_ok
                     st.rerun()
             with col_b:
                 if st.button("❌ Cancelar"):

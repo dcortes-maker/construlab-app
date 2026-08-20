@@ -329,6 +329,46 @@ def guardar_reserva(nombre: str, unidad: str, monto: float, fecha, notas: str = 
     return res.data[0]['id']
 
 
+def migrar_reserva_a_plan(unidad: str) -> dict:
+    """Al cargar el plan de un cliente en reserva: marca la cuota "Reserva" como
+    pagada con la fecha y el monto de la reserva, y borra el registro de reservas
+    para que el dinero no quede contado dos veces.
+
+    Devuelve {} si la unidad no tenía reserva.
+    """
+    sb  = _sb()
+    res = sb.table('reservas').select('*') \
+            .eq('proyecto', _proyecto_db()).eq('unidad', unidad).execute().data
+    if not res:
+        return {}
+    r          = res[0]
+    monto_res  = float(r['monto'])
+    fecha_res  = _a_fecha(r['fecha']) or date.today()
+
+    # Cuota de reserva del plan (la primera cuyo concepto sea "Reserva")
+    cuotas = sb.table('cuotas').select('id,num_cuota,descripcion,monto,fecha_pago') \
+               .eq('proyecto', _proyecto_db()).eq('unidad', unidad) \
+               .order('num_cuota').execute().data
+    # "Reserva" o "Separación": ambos nombran el primer abono de reserva
+    cuota = next((c for c in cuotas
+                  if not c['fecha_pago']
+                  and any(k in (c['descripcion'] or '').lower()
+                          for k in ('reserva', 'separac'))), None)
+
+    marcada = False
+    if cuota:
+        if monto_res >= float(cuota['monto']):
+            marcar_pago(cuota['id'], fecha_res, 'Transferencia')
+        else:
+            pago_parcial(cuota['id'], monto_res, fecha_res, 'Transferencia')
+        marcada = True
+
+    sb.table('reservas').delete().eq('id', r['id']).execute()
+    cargar_reservas.clear()
+    cargar_datos.clear()
+    return {'monto': monto_res, 'fecha': fecha_res, 'marcada': marcada}
+
+
 def eliminar_reserva(rid: int):
     _sb().table('reservas').delete().eq('id', rid).execute()
 
