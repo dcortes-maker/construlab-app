@@ -275,7 +275,9 @@ if seccion == "📎 Cargar Plan de Pago":
             unidad_pdf = st.text_input("Apartamento (ej: 3-B)", key="uni_pdf").strip().upper()
 
     st.markdown("#### 2. Sube el archivo del plan")
-    st.caption("PDF, Excel (.xlsx, .xls)")
+    st.caption("PDF (ANEXO nuevo o ANEXO 1 de control de pagos) · Excel (.xlsx, .xls). "
+               "Los PDF escaneados como imagen no se pueden leer: cárgalos y captura "
+               "las cuotas a mano en la tabla de revisión.")
     archivo = st.file_uploader("Archivo", type=["pdf", "xlsx", "xls"], key="uploader_pdf",
                                label_visibility="collapsed")
 

@@ -803,12 +803,18 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
             cells = [str(c).strip() if c is not None else '' for c in row]
             low   = [c.lower() for c in cells]
             if not en_tabla:
+                def _col(*claves):
+                    # Entre los encabezados que coinciden, elige el más corto: evita
+                    # las celdas fusionadas que arrastran toda la columna de datos.
+                    cands = [i for i, c in enumerate(low) if any(k in c for k in claves)]
+                    return min(cands, key=lambda i: len(low[i])) if cands else None
+
                 if any('cuot' in c for c in low) and any('fech' in c for c in low):
-                    col_num  = next((i for i,c in enumerate(low) if 'cuot' in c), None)
-                    col_fecha= next((i for i,c in enumerate(low) if 'fech' in c), None)
-                    col_ab   = next((i for i,c in enumerate(low) if 'abono' in c or 'inicial' in c), None)
-                    col_ex   = next((i for i,c in enumerate(low) if 'gasto' in c or 'manejo' in c or 'legal' in c), None)
-                    col_desc = next((i for i,c in enumerate(low) if 'observ' in c or 'concepto' in c or 'desc' in c), None)
+                    col_num  = _col('cuot')
+                    col_fecha= _col('fech')
+                    col_ab   = _col('abono', 'inicial')
+                    col_ex   = _col('gasto', 'manejo', 'legal')
+                    col_desc = _col('observ', 'concepto', 'desc')
                     en_tabla = True
                 continue
             if col_num is None or col_num >= len(cells): continue
@@ -848,15 +854,74 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
         df_tmp = pd.read_excel(io.BytesIO(archivo_bytes), header=None)
         return _procesar_filas(df_tmp.values.tolist())
 
+    ROMANOS = ['I','II','III','IV','V','VI','VII','VIII','IX','X',
+               'XI','XII','XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX']
+
+    def _fecha_mmdd(txt):
+        """Fecha del ANEXO en formato MM/DD/YYYY, respetando el día exacto."""
+        m = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})', str(txt).strip())
+        if not m:
+            return None
+        a, b, anio = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        mes, dia = (a, b) if a <= 12 else (b, a)   # si el 1° > 12 es DD/MM
+        try:
+            return date_cls(anio, mes, min(dia, _ultimo_dia(anio, mes)))
+        except Exception:
+            return None
+
+    def _parsear_anexo(texto):
+        """Lee el ANEXO de Riviera Park (formato etiqueta-valor, no tabla).
+
+        Toma solo la sección PLAN DE PAGOS: reserva, Pago N y gastos.
+        """
+        if 'PLAN DE PAGOS' not in texto.upper():
+            return []
+        res = []
+
+        m = re.search(r'Fecha de reserva\s+(\d{1,2}/\d{1,2}/\d{4}).*?'
+                      r'Monto de reserva\s+B/\.?\s*([\d.,]+)', texto, re.I)
+        if m:
+            monto = _parse_monto(m.group(2))
+            if monto:
+                res.append({'num_cuota': 1, 'desc': 'Reserva',
+                            'fecha_venc': _fecha_mmdd(m.group(1)), 'monto': monto})
+
+        for mp in re.finditer(r'Fecha Pago\s+(\d+)\s+(\d{1,2}/\d{1,2}/\d{4})\s+'
+                              r'Monto Pago\s+\1\s+B/\.?\s*([\d.,]+)', texto, re.I):
+            num   = int(mp.group(1))
+            monto = _parse_monto(mp.group(3))
+            if not monto:
+                continue
+            desc = f"{ROMANOS[num-1]} Pago" if 1 <= num <= len(ROMANOS) else 'Abono inicial'
+            res.append({'num_cuota': num, 'desc': desc,
+                        'fecha_venc': _fecha_mmdd(mp.group(2)), 'monto': monto})
+
+        sig = max((r['num_cuota'] for r in res), default=0) + 1
+        for patron, etiqueta in ((r'Gastos?\s+legales?\s+B/\.?\s*([\d.,]+)', 'Gasto Legal'),
+                                 (r'Gastos?\s+de\s+Manejo\s+B/\.?\s*([\d.,]+)', 'Gasto Manejo')):
+            mg = re.search(patron, texto, re.I)
+            if mg:
+                monto = _parse_monto(mg.group(1))
+                if monto:
+                    res.append({'num_cuota': sig, 'desc': etiqueta,
+                                'fecha_venc': None, 'monto': monto})
+                    sig += 1
+
+        res.sort(key=lambda r: r['num_cuota'])
+        return res
+
     import pdfplumber
-    fls = []
+    fls, texto_pdf = [], ''
     with pdfplumber.open(io.BytesIO(archivo_bytes)) as pdf:
         total_chars = sum(len(p.chars) for p in pdf.pages)
         if total_chars > 0:
             for page in pdf.pages:
                 for tabla in page.extract_tables():
                     fls.extend(tabla)
+                texto_pdf += (page.extract_text() or '') + '\n'
             resultado = _procesar_filas(fls)
+            if resultado: return resultado
+            resultado = _parsear_anexo(texto_pdf)
             if resultado: return resultado
 
     return []
