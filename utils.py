@@ -779,8 +779,23 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
         if txt is None: return None
         if isinstance(txt, (int, float)): return float(txt) if txt > 0 else None
         s = str(txt).strip().replace('$','').replace(' ','')
-        if ',' in s and '.' in s: s = s.replace('.','').replace(',','.')
-        elif ',' in s: s = s.replace(',','.')
+        s = re.sub(r'(?i)b/\.?', '', s)          # símbolo balboa
+        s = re.sub(r'[^\d.,]', '', s)
+
+        if ',' in s and '.' in s:
+            # El separador que aparece de último es el decimal
+            if s.rfind(',') > s.rfind('.'):
+                s = s.replace('.', '').replace(',', '.')   # 1.050,25
+            else:
+                s = s.replace(',', '')                     # 1,050.25
+        elif ',' in s:
+            # Una sola coma: es decimal solo si le siguen 1 o 2 dígitos.
+            # "1,050" son mil cincuenta, no 1.05.
+            ent, _, dec = s.rpartition(',')
+            s = f"{ent.replace(',', '')}.{dec}" if len(dec) in (1, 2) else s.replace(',', '')
+        elif s.count('.') > 1:
+            s = s.replace('.', '')                         # 1.050.000
+
         s = re.sub(r'[^\d.]', '', s)
         try:
             v = float(s); return v if v > 0 else None
