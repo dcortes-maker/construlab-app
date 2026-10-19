@@ -1,6 +1,7 @@
 import streamlit as st
 from auth import verificar_login, barra_superior, cerrar_sesion
-from utils import _proyecto_db, cargar_datos, cargar_reservas, clientes_con_contrato
+from utils import (_proyecto_db, cargar_datos, cargar_reservas, clientes_con_contrato,
+                   saldos_retiros)
 
 st.set_page_config(
     page_title="Riviera Park II",
@@ -20,6 +21,28 @@ hoy = datos['hoy']
 reservas = cargar_reservas(_proyecto_db())
 total_reservado = sum(r['monto'] for r in reservas)
 
+# Dinero de los que se fueron. Sin devolución el abono se queda en el proyecto,
+# así que suma al total en banco aunque su plan ya no exista; se muestra aparte
+# para que se vea de dónde viene. Lo que sí se devuelve ya salió del total.
+retiros = saldos_retiros(_proyecto_db())
+
+def _bloque(titulo, monto, color):
+    return f"""
+    <div style='width:1px;background:#2a3550;height:40px;'></div>
+    <div>
+        <div style='font-size:.6rem;color:#64748b;text-transform:uppercase;
+                    letter-spacing:.06em;margin-bottom:4px;'>{titulo}</div>
+        <div style='font-size:1.1rem;font-weight:700;color:{color};'>${monto:,.2f}</div>
+    </div>"""
+
+bloque_retiros = ""
+if retiros['retenido']:
+    bloque_retiros += _bloque(f"De retirados ({retiros['cuantos_retenido']})",
+                              retiros['retenido'], "#a78bfa")
+if retiros['por_devolver']:
+    bloque_retiros += _bloque(f"Por devolver ({retiros['cuantas_pendientes']})",
+                              retiros['por_devolver'], "#f87171")
+
 # ── Total en Banco (primero, es el resumen global) ────────────────
 st.markdown(f"""
 <div style='background:#1e2536; border-radius:10px; padding:16px 20px;
@@ -30,7 +53,7 @@ st.markdown(f"""
         <div style='font-size:.65rem;color:#64748b;letter-spacing:.08em;
                     text-transform:uppercase;margin-bottom:6px;'>TOTAL EN BANCO</div>
         <div style='font-size:1.8rem;font-weight:800;color:#38bdf8;
-                    letter-spacing:-.02em;'>${k['abonado'] + total_reservado:,.2f}</div>
+                    letter-spacing:-.02em;'>${k['abonado'] + total_reservado + retiros['retenido']:,.2f}</div>
     </div>
     <div style='width:1px;background:#2a3550;height:40px;'></div>
     <div>
@@ -43,7 +66,7 @@ st.markdown(f"""
         <div style='font-size:.6rem;color:#64748b;text-transform:uppercase;
                     letter-spacing:.06em;margin-bottom:4px;'>Reservas</div>
         <div style='font-size:1.1rem;font-weight:700;color:#f59e0b;'>${total_reservado:,.2f}</div>
-    </div>
+    </div>{bloque_retiros}
 </div>
 """, unsafe_allow_html=True)
 

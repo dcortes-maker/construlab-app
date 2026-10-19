@@ -6,7 +6,7 @@ from utils import (_proyecto_db, cargar_datos, agregar_fila_plan, parsear_plan,
                    eliminar_filas_plan, actualizar_fila_plan, cargar_reservas,
                    listar_adjuntos, subir_adjunto, descargar_adjunto, eliminar_adjunto,
                    pdf_a_imagenes, reordenar_plan, extraer_datos_cliente,
-                   migrar_reserva_a_plan)
+                   migrar_reserva_a_plan, retirar_cliente)
 from datetime import date
 import pandas as pd
 
@@ -217,6 +217,43 @@ if seccion == "📄 Ver Plan":
                 if st.button("✖ Cerrar vista previa", key="close_ec"):
                     st.session_state.pop('mostrar_ec', None)
                     st.rerun()
+
+    # Retirar del proyecto (solo admin)
+    if st.session_state.get('rol') == 'admin' and sel != "Todos":
+        unidad_r = sel.split(" — ")[0]
+        abonado_r = sum(f['monto'] for f in filas if f['fp'])
+
+        with st.expander("📤 Retirar del proyecto"):
+            st.caption("El cliente deja de aparecer en la app y su apartamento queda libre. "
+                       "Nada se borra: su plan y sus recibos quedan guardados en Clientes retirados.")
+            if abonado_r:
+                st.info(f"**{sel}** tiene **${abonado_r:,.2f}** abonados.")
+            else:
+                st.info(f"**{sel}** no ha abonado nada todavía.")
+
+            motivo_r = st.text_input("Motivo (opcional)", key="motivo_retiro")
+
+            if abonado_r:
+                devol = st.radio(
+                    "¿Se le devuelve el dinero?",
+                    ["No aplica devolución", "Aplica devolución"],
+                    key="devol_retiro",
+                    help="Si aplica, queda pendiente hasta que registres la transferencia "
+                         "en la pantalla de Clientes retirados.",
+                )
+                aplica = devol == "Aplica devolución"
+            else:
+                aplica = False
+
+            if st.button("📤 Retirar del proyecto", type="primary"):
+                res = retirar_cliente(unidad_r, motivo_r, aplica,
+                                      st.session_state.get('nombre', ''))
+                if res['ok']:
+                    st.session_state.pop('motivo_retiro', None)
+                    st.success(f"{res['nombre']} retirado. El apartamento {unidad_r} queda libre.")
+                    st.rerun()
+                else:
+                    st.error(res['motivo'])
 
     # Eliminar plan completo (solo admin)
     if st.session_state.get('rol') == 'admin' and sel != "Todos":

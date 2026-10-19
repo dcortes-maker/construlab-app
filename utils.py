@@ -7,6 +7,8 @@ from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 import io
+import json
+import secrets
 
 _PROYECTOS_DB = {
     "riviera_park_2":    "riviera-park-2",
@@ -36,7 +38,7 @@ def _sb() -> Client:
 
 def _soltar_cache():
     """Fuera de Streamlit (la API, el respaldo) no hay caché que limpiar."""
-    for fn in (cargar_datos, cargar_reservas, clientes_con_contrato):
+    for fn in (cargar_datos, cargar_reservas, clientes_con_contrato, listar_retirados):
         try:
             fn.clear()
         except Exception:
@@ -389,6 +391,209 @@ def migrar_reserva_a_plan(unidad: str, proyecto: str = "") -> dict:
 
 def eliminar_reserva(rid: int):
     _sb().table('reservas').delete().eq('id', rid).execute()
+
+
+# ─── Retiros (quien se sale del proyecto) ─────────────────────────
+# Retirar no borra nada. A las filas del cliente se les cambia el proyecto por
+# "<proyecto>#retirado#<id>", así desaparecen de todas las consultas de la app
+# —que siempre filtran por proyecto— y el apartamento queda libre para otro
+# cliente sin que los dos historiales se mezclen. Deshacerlo es devolverle su
+# proyecto original.
+#
+# La ficha de cada retiro vive en su propio archivo del bucket. Un archivo por
+# retiro y no una lista compartida: así dos personas retirando a la vez no se
+# pisan lo que escribió la otra.
+
+_MARCA_RETIRO = '#retirado#'
+_DIR_RETIROS  = 'sistema/retiros'
+
+
+def _proyecto_retirado(proyecto: str, rid: str) -> str:
+    return f"{proyecto}{_MARCA_RETIRO}{rid}"
+
+
+def _leer_doc(ruta: str):
+    """Lee un JSON del bucket sin pasar por la caché de Supabase.
+
+    storage.download() se sirve cacheado y devolvería la versión anterior
+    durante una hora, así que se pide por URL firmada con un parámetro
+    distinto en cada llamada.
+    """
+    import time as _time
+    import urllib.request as _url
+    try:
+        firmada = _sb().storage.from_(BUCKET).create_signed_url(ruta, 60)["signedURL"]
+    except Exception:
+        return None
+    sep = "&" if "?" in firmada else "?"
+    pedido = _url.Request(f"{firmada}{sep}cb={_time.time_ns()}",
+                          headers={"Cache-Control": "no-cache"})
+    with _url.urlopen(pedido, timeout=30) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _escribir_doc(ruta: str, data: dict):
+    _sb().storage.from_(BUCKET).upload(
+        ruta, json.dumps(data, ensure_ascii=False, default=str).encode(),
+        file_options={"content-type": "application/json",
+                      "upsert": "true", "cache-control": "0"},
+    )
+
+
+def _ficha_retiro(proyecto, unidad, nombre, tipo, motivo, abonado,
+                  aplica_devolucion, usuario) -> dict:
+    rid = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3)}"
+    ficha = {
+        'id':           rid,
+        'proyecto':     proyecto,
+        'unidad':       unidad,
+        'nombre':       nombre or '',
+        'tipo':         tipo,
+        'fecha_retiro': date.today().isoformat(),
+        'motivo':       (motivo or '').strip(),
+        'abonado':      round(float(abonado), 2),
+        'devolucion':   'pendiente' if aplica_devolucion else 'no_aplica',
+        'devol_monto':  None,
+        'devol_fecha':  None,
+        'creado_por':   usuario or '',
+        'created_at':   datetime.now().isoformat(timespec='seconds'),
+    }
+    _escribir_doc(f"{_DIR_RETIROS}/{rid}.json", ficha)
+    return ficha
+
+
+def retirar_cliente(unidad: str, motivo: str = '', aplica_devolucion: bool = False,
+                    usuario: str = '', proyecto: str = '') -> dict:
+    sb = _sb()
+    proyecto = proyecto or _proyecto_db()
+    filas = (sb.table('cuotas').select('id,nombre,monto,fecha_pago')
+             .eq('proyecto', proyecto).eq('unidad', unidad).execute().data) or []
+    if not filas:
+        return {'ok': False, 'motivo': 'Ese apartamento no tiene un plan activo.'}
+
+    abonado = sum(float(f['monto'] or 0) for f in filas if f.get('fecha_pago'))
+    nombre  = next((f['nombre'] for f in filas if f.get('nombre')), '')
+
+    ficha = _ficha_retiro(proyecto, unidad, nombre, 'cpp', motivo,
+                          abonado, aplica_devolucion, usuario)
+    sb.table('cuotas').update({'proyecto': _proyecto_retirado(proyecto, ficha['id'])}) \
+      .in_('id', [f['id'] for f in filas]).execute()
+    _soltar_cache()
+    return {'ok': True, 'retiro_id': ficha['id'], 'nombre': nombre,
+            'abonado': round(abonado, 2), 'cuotas': len(filas)}
+
+
+def retirar_reserva(rid_reserva: int, motivo: str = '', aplica_devolucion: bool = False,
+                    usuario: str = '') -> dict:
+    sb = _sb()
+    filas = sb.table('reservas').select('*').eq('id', rid_reserva).execute().data or []
+    if not filas:
+        return {'ok': False, 'motivo': 'Esa reserva ya no existe.'}
+    r = filas[0]
+    if _MARCA_RETIRO in (r.get('proyecto') or ''):
+        return {'ok': False, 'motivo': 'Esa reserva ya está retirada.'}
+
+    ficha = _ficha_retiro(r['proyecto'], r['unidad'], r.get('nombre') or '', 'reserva',
+                          motivo, float(r.get('monto') or 0), aplica_devolucion, usuario)
+    sb.table('reservas').update({'proyecto': _proyecto_retirado(r['proyecto'], ficha['id'])}) \
+      .eq('id', rid_reserva).execute()
+    _soltar_cache()
+    return {'ok': True, 'retiro_id': ficha['id'], 'nombre': r.get('nombre') or '',
+            'abonado': round(float(r.get('monto') or 0), 2)}
+
+
+@st.cache_data(ttl=15)
+def listar_retirados(proyecto: str = "") -> list:
+    proyecto = proyecto or _proyecto_db()
+    try:
+        archivos = _sb().storage.from_(BUCKET).list(
+            _DIR_RETIROS, {'limit': 1000}) or []
+    except Exception:
+        return []
+    fichas = []
+    for a in archivos:
+        nombre = a.get('name') or ''
+        if not nombre.endswith('.json'):
+            continue
+        ficha = _leer_doc(f"{_DIR_RETIROS}/{nombre}")
+        if ficha and ficha.get('proyecto') == proyecto:
+            fichas.append(ficha)
+    return sorted(fichas, key=lambda f: f.get('created_at') or '', reverse=True)
+
+
+def marcar_devolucion_hecha(retiro_id: str, monto: float = None, fecha=None) -> bool:
+    ruta = f"{_DIR_RETIROS}/{retiro_id}.json"
+    ficha = _leer_doc(ruta)
+    if not ficha:
+        return False
+    ficha['devolucion']  = 'devuelta'
+    ficha['devol_fecha'] = (fecha or date.today()).isoformat()
+    if monto is not None:
+        ficha['devol_monto'] = round(float(monto), 2)
+    _escribir_doc(ruta, ficha)
+    _soltar_cache()
+    return True
+
+
+def reingresar_retirado(retiro_id: str) -> dict:
+    """Deshace un retiro: el cliente vuelve a aparecer como si nada.
+
+    Se niega si el apartamento ya se le vendió a otro: devolver al anterior
+    dejaría a dos clientes distintos bajo el mismo número y los totales de esa
+    unidad saldrían sumados.
+    """
+    sb = _sb()
+    ficha = _leer_doc(f"{_DIR_RETIROS}/{retiro_id}.json")
+    if not ficha:
+        return {'ok': False, 'motivo': 'No encuentro ese retiro.'}
+
+    ocupada = (sb.table('cuotas').select('nombre')
+               .eq('proyecto', ficha['proyecto']).eq('unidad', ficha['unidad'])
+               .limit(1).execute().data) or []
+    if not ocupada:
+        ocupada = (sb.table('reservas').select('nombre')
+                   .eq('proyecto', ficha['proyecto']).eq('unidad', ficha['unidad'])
+                   .limit(1).execute().data) or []
+    if ocupada:
+        quien = ocupada[0].get('nombre') or 'otro cliente'
+        return {'ok': False,
+                'motivo': f"El apartamento {ficha['unidad']} ya es de {quien}. "
+                          f"Para reingresar a {ficha['nombre']} hay que retirar antes a esa persona."}
+
+    marcado = _proyecto_retirado(ficha['proyecto'], retiro_id)
+    sb.table('cuotas').update({'proyecto': ficha['proyecto']}).eq('proyecto', marcado).execute()
+    sb.table('reservas').update({'proyecto': ficha['proyecto']}).eq('proyecto', marcado).execute()
+    try:
+        sb.storage.from_(BUCKET).remove([f"{_DIR_RETIROS}/{retiro_id}.json"])
+    except Exception:
+        pass
+    _soltar_cache()
+    return {'ok': True, 'nombre': ficha['nombre'], 'unidad': ficha['unidad']}
+
+
+def saldos_retiros(proyecto: str = "") -> dict:
+    """Qué pasó con el dinero de los que se fueron.
+
+    Sin devolución el abono se queda en el proyecto, así que sigue sumando al
+    total en banco aunque su plan de pagos ya no exista. Con devolución sale:
+    pendiente mientras no se haga la transferencia, devuelto una vez hecha.
+    """
+    retenido = por_devolver = devuelto = 0.0
+    n_ret = n_pend = 0
+    for r in listar_retirados(proyecto):
+        monto = float(r.get('abonado') or 0)
+        estado = r.get('devolucion')
+        if estado == 'no_aplica':
+            retenido += monto
+            n_ret += 1 if monto else 0
+        elif estado == 'pendiente':
+            por_devolver += monto
+            n_pend += 1
+        else:
+            devuelto += float(r.get('devol_monto') or monto)
+    return {'retenido': round(retenido, 2), 'cuantos_retenido': n_ret,
+            'por_devolver': round(por_devolver, 2), 'cuantas_pendientes': n_pend,
+            'devuelto': round(devuelto, 2)}
 
 
 # ─── Adjuntos (Supabase Storage) ──────────────────────────────────
