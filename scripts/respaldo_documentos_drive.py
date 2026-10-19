@@ -168,7 +168,8 @@ class DriveAPIDestino:
         from googleapiclient.http import MediaIoBaseUpload
 
         parent = self._dir(unidad)
-        media = MediaIoBaseUpload(io.BytesIO(data), mimetype="application/pdf", resumable=False)
+        # Los comprobantes pueden ser una foto del banco, no siempre un PDF.
+        media = MediaIoBaseUpload(io.BytesIO(data), mimetype=utils._mime(fname), resumable=False)
         ya = self._buscar(fname, parent)
         if ya and int(ya.get("size") or 0) == len(data):
             return "igual"
@@ -261,8 +262,8 @@ def main() -> int:
     sb = create_client(url, key)
     utils.configurar_cliente(sb)
 
-    copiados = {"contrato": 0, "anexo": 0, "recibo": 0}
-    iguales = {"contrato": 0, "anexo": 0, "recibo": 0}
+    copiados = {"contrato": 0, "anexo": 0, "recibo": 0, "comprobante": 0}
+    iguales = {"contrato": 0, "anexo": 0, "recibo": 0, "comprobante": 0}
     omitidos = 0
 
     for item in _listar_storage(sb, ""):
@@ -316,6 +317,7 @@ def main() -> int:
         f"contratos nuevos {copiados['contrato']} (ya estaban {iguales['contrato']}),",
         f"anexos nuevos {copiados['anexo']} (ya estaban {iguales['anexo']}),",
         f"recibos nuevos {copiados['recibo']} (ya estaban {iguales['recibo']}),",
+        f"comprobantes nuevos {copiados['comprobante']} (ya estaban {iguales['comprobante']}),",
         f"anulados renombrados {renombrados},",
         f"otros adjuntos sin copiar {omitidos}.",
         flush=True,

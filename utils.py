@@ -642,6 +642,18 @@ def clientes_con_contrato(proyecto: str = "") -> set:
     return out
 
 
+@st.cache_data(ttl=15)
+def unidades_con_comprobante(unidades: tuple) -> set:
+    """Cuáles de esas unidades ya tienen guardado un comprobante de pago."""
+    out = set()
+    for u in unidades:
+        for f in listar_adjuntos(u):
+            if clasificar_documento(f['name']) == 'comprobante':
+                out.add(u)
+                break
+    return out
+
+
 def subir_adjunto(unidad: str, filename: str, file_bytes: bytes) -> bool:
     sb     = _sb()
     folder = _folder(unidad)
@@ -675,12 +687,14 @@ def eliminar_adjunto(unidad: str, filename: str):
 
 
 def clasificar_documento(filename: str) -> str:
-    """contrato, anexo, o vacío si el archivo no entra en el respaldo de Drive."""
+    """contrato, anexo, comprobante, o vacío si no entra en el respaldo de Drive."""
     n = (filename or "").lower()
     if "contrato" in n or "cpp" in n:
         return "contrato"
     if n.startswith("plan_de_pagos") or "anexo" in n or "plan de pago" in n:
         return "anexo"
+    if "comprobante" in n:
+        return "comprobante"
     return ""
 
 

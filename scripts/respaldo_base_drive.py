@@ -291,8 +291,11 @@ class DestinoAPI:
         borradas = 0
         for carpeta in res.get("files") or []:
             if not _se_conserva(carpeta["name"]):
-                self.service.files().delete(
-                    fileId=carpeta["id"], supportsAllDrives=True
+                # A la papelera, no files().delete(): en la unidad compartida la
+                # cuenta de servicio no puede borrar lo que no creó y daría 404.
+                self.service.files().update(
+                    fileId=carpeta["id"], body={"trashed": True},
+                    supportsAllDrives=True,
                 ).execute()
                 borradas += 1
         return borradas

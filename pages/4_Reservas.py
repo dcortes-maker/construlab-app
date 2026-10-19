@@ -2,7 +2,7 @@ import streamlit as st
 import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion
 from utils import (_proyecto_db, cargar_reservas, guardar_reserva, eliminar_reserva,
-                   retirar_reserva)
+                   retirar_reserva, subir_adjunto, unidades_con_comprobante)
 from datetime import date
 import pandas as pd
 
@@ -19,12 +19,14 @@ reservas = cargar_reservas(_proyecto_db())
 
 # ─── Tabla de reservas actuales ────────────────────────────────────
 if reservas:
+    con_comp = unidades_con_comprobante(tuple(sorted({r['unidad'] for r in reservas})))
     df = pd.DataFrame([{
         'ID':       r['id'],
         'Cliente':  r['nombre'],
         'Lote / Apto': r['unidad'],
         'Monto ($)': r['monto'],
         'Fecha':    r['fecha'],
+        'Comprobante': '✅' if r['unidad'] in con_comp else '⚠️ falta',
         'Notas':    r['notas'],
     } for r in reservas])
 
@@ -41,6 +43,23 @@ if reservas:
     )
 
     if st.session_state.get('rol') == 'admin':
+        faltan = [r for r in reservas if r['unidad'] not in con_comp]
+        if faltan:
+            with st.expander(f"📎 Subir comprobante que falta ({len(faltan)})", expanded=False):
+                op_c = {f"{r['unidad']} — {r['nombre']} — ${r['monto']:,.2f}": r for r in faltan}
+                sel_c = st.selectbox("¿De quién es el comprobante?", list(op_c.keys()), key="sel_cmp")
+                r_c = op_c[sel_c]
+                arch = st.file_uploader("Comprobante (PDF o foto)",
+                                        type=['pdf', 'png', 'jpg', 'jpeg'], key="cmp_viejo")
+                if st.button("Guardar comprobante") and arch is not None:
+                    ext = arch.name.rsplit('.', 1)[-1].lower()
+                    subir_adjunto(r_c['unidad'],
+                                  f"Comprobante_{r_c['unidad'].replace('/', '-')}_{r_c['fecha']}.{ext}",
+                                  arch.getvalue())
+                    unidades_con_comprobante.clear()
+                    st.success(f"Comprobante de {r_c['nombre']} guardado.")
+                    st.rerun()
+
         with st.expander("📤 Retirar del proyecto"):
             st.caption("El cliente sale de esta lista pero queda guardado en Clientes retirados, "
                        "con su abono y el estado de su devolución.")
@@ -94,14 +113,27 @@ if st.session_state.get('rol') == 'admin':
         fecha_r  = st.date_input("Fecha de la reserva", value=date.today(),
                                  format="DD/MM/YYYY", key="fch_r")
 
+    comp_r = st.file_uploader(
+        "Comprobante de pago (PDF o foto)",
+        type=['pdf', 'png', 'jpg', 'jpeg'], key="cmp_r",
+        help="Queda guardado en la carpeta del apartamento y se copia a Drive esa misma noche.",
+    )
+
     if st.button("✅ Guardar reserva", type="primary"):
         if not nombre_r or not unidad_r:
             st.error("Nombre y unidad son obligatorios.")
+        elif comp_r is None:
+            st.error("Falta el comprobante de pago. Sin él la reserva no queda respaldada.")
         else:
             guardar_reserva(nombre_r, unidad_r, monto_r, fecha_r, notas_r)
-            for k in ['nom_r', 'uni_r', 'not_r', 'mnt_r', 'fch_r']:
+            ext = comp_r.name.rsplit('.', 1)[-1].lower()
+            subir_adjunto(unidad_r,
+                          f"Comprobante_{unidad_r.replace('/', '-')}_{fecha_r.isoformat()}.{ext}",
+                          comp_r.getvalue())
+            unidades_con_comprobante.clear()
+            for k in ['nom_r', 'uni_r', 'not_r', 'mnt_r', 'fch_r', 'cmp_r']:
                 st.session_state.pop(k, None)
-            st.success(f"Reserva de {nombre_r} guardada.")
+            st.success(f"Reserva de {nombre_r} guardada con su comprobante.")
             st.rerun()
 else:
     st.info("Solo el administrador puede agregar o eliminar reservas.")
