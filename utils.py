@@ -1309,3 +1309,4 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
             if resultado: return resultado
 
     return []
+
