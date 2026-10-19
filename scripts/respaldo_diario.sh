@@ -21,6 +21,12 @@ echo "--- documentos ---"
 "$PY" scripts/respaldo_documentos_drive.py 2>&1 | grep -v "WARNING streamlit"
 [ "${PIPESTATUS[0]}" -eq 0 ] || fallo=1
 
+# Busca en Drive clientes que no esten en la app y los deja propuestos en el
+# buzon. No crea nada: alguien los aprueba desde la app.
+echo "--- revision de Drive ---"
+"$PY" scripts/revisar_drive.py 2>&1 | grep -viE "WARNING streamlit|ScriptRunContext|streamlit run"
+[ "${PIPESTATUS[0]}" -eq 0 ] || fallo=1
+
 if [ "$fallo" -ne 0 ]; then
     echo "ATENCION: el respaldo termino con errores."
 else

@@ -38,7 +38,8 @@ def _sb() -> Client:
 
 def _soltar_cache():
     """Fuera de Streamlit (la API, el respaldo) no hay caché que limpiar."""
-    for fn in (cargar_datos, cargar_reservas, clientes_con_contrato, listar_retirados):
+    for fn in (cargar_datos, cargar_reservas, clientes_con_contrato, listar_retirados,
+               listar_buzon, unidades_con_comprobante):
         try:
             fn.clear()
         except Exception:
@@ -569,6 +570,68 @@ def reingresar_retirado(retiro_id: str) -> dict:
         pass
     _soltar_cache()
     return {'ok': True, 'nombre': ficha['nombre'], 'unidad': ficha['unidad']}
+
+
+# ─── Buzón (lo que se encontró en Drive y falta aprobar) ──────────
+# Lo llena scripts/revisar_drive.py. Una propuesta no crea nada: alguien la
+# aprueba desde la pantalla Buzón y ahí sí entra el plan.
+
+_DIR_BUZON = 'sistema/buzon'
+
+
+@st.cache_data(ttl=15)
+def listar_buzon(proyecto: str = "", solo_pendientes: bool = True) -> list:
+    proyecto = proyecto or _proyecto_db()
+    try:
+        archivos = _sb().storage.from_(BUCKET).list(_DIR_BUZON, {'limit': 1000}) or []
+    except Exception:
+        return []
+    out = []
+    for a in archivos:
+        if not (a.get('name') or '').endswith('.json'):
+            continue
+        p = _leer_doc(f"{_DIR_BUZON}/{a['name']}")
+        if not p or p.get('proyecto') != proyecto:
+            continue
+        if solo_pendientes and p.get('estado') != 'pendiente':
+            continue
+        out.append(p)
+    return sorted(out, key=lambda p: (not p.get('legible'), p.get('unidad') or ''))
+
+
+def _cerrar_propuesta(pid: str, estado: str, quien: str = ''):
+    ruta = f"{_DIR_BUZON}/{pid}.json"
+    p = _leer_doc(ruta)
+    if not p:
+        return None
+    p['estado'] = estado
+    p['resuelto_por'] = quien or ''
+    p['resuelto_en'] = datetime.now().isoformat(timespec='seconds')
+    _escribir_doc(ruta, p)
+    _soltar_cache()
+    return p
+
+
+def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str = '') -> dict:
+    """Crea el plan de la propuesta y la marca aprobada."""
+    p = _leer_doc(f"{_DIR_BUZON}/{pid}.json")
+    if not p:
+        return {'ok': False, 'motivo': 'No encuentro esa propuesta.'}
+    if not p.get('cuotas'):
+        return {'ok': False, 'motivo': 'Esa propuesta no trae cuotas: hay que cargar el plan a mano.'}
+
+    unidad = (unidad or p['unidad']).strip().upper()
+    nombre = (nombre or p['nombre']).strip().upper()
+    filas = [{'num_cuota': c['num_cuota'], 'desc': c['desc'],
+              'fecha_venc': c.get('fecha_venc') or None, 'monto': c['monto']}
+             for c in p['cuotas']]
+    creadas = agregar_filas_plan_bulk(unidad, nombre, filas, p['proyecto'])
+    _cerrar_propuesta(pid, 'aprobada', quien)
+    return {'ok': True, 'unidad': unidad, 'nombre': nombre, 'creadas': creadas}
+
+
+def descartar_propuesta(pid: str, quien: str = '') -> bool:
+    return bool(_cerrar_propuesta(pid, 'descartada', quien))
 
 
 def saldos_retiros(proyecto: str = "") -> dict:
