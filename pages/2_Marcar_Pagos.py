@@ -1,9 +1,9 @@
 import streamlit as st
 import sys; sys.path.insert(0, '..')
 from auth import verificar_login, barra_superior, cerrar_sesion, solo_admin
-from utils import (_proyecto_db, cargar_datos, marcar_pago, desmarcar_pago, generar_recibo,
+from utils import (_proyecto_db, cargar_datos, marcar_pago, desmarcar_pago,
                    ajustar_monto_siguiente, siguiente_num_recibo, registrar_recibo,
-                   pdf_a_imagenes, listar_recibos, pago_parcial)
+                   pdf_a_imagenes, listar_recibos, pago_parcial, obtener_pdf_recibo)
 from datetime import date
 import base64
 
@@ -20,6 +20,7 @@ def _emitir_recibo(cuota_id, unidad, nombre, desc, monto, fecha, forma):
     """
     num = siguiente_num_recibo()
     registrar_recibo(num, cuota_id, unidad, nombre, desc, monto, fecha, forma)
+    obtener_pdf_recibo(num, unidad, nombre, desc, monto, fecha, forma)
 
 
 def seccion_recibos_emitidos():
@@ -45,10 +46,10 @@ def seccion_recibos_emitidos():
                     fecha_r = date.fromisoformat(str(r['fecha']))
                 except Exception:
                     fecha_r = date.today()
-                pdf_r = generar_recibo(
-                    nombre=r['nombre'], unidad=r['unidad'], desc=r['desc'],
+                pdf_r = obtener_pdf_recibo(
+                    num=r['num'], unidad=r['unidad'], nombre=r['nombre'], desc=r['desc'],
                     monto=float(r['monto']), fecha_pago=fecha_r,
-                    num_recibo=r['num'], forma_pago=r.get('forma') or 'Transferencia')
+                    forma_pago=r.get('forma') or 'Transferencia')
                 st.download_button(
                     "⬇️ Recibo", data=pdf_r,
                     file_name=f"Recibo_{r['num']}_{r['unidad']}.pdf",
@@ -96,10 +97,9 @@ if not es_admin:
         with c2:
             r = recibos_map.get(f['fila'])
             if r:
-                pdf_r = generar_recibo(
-                    nombre=r['nombre'], unidad=r['unidad'], desc=r['desc'],
+                pdf_r = obtener_pdf_recibo(
+                    num=r['num'], unidad=r['unidad'], nombre=r['nombre'], desc=r['desc'],
                     monto=float(r['monto']), fecha_pago=f['fp'],
-                    num_recibo=r['num'],
                     forma_pago=r.get('forma') or f['forma'] or 'Transferencia')
                 st.download_button(
                     f"⬇️ Recibo N° {r['num']}", data=pdf_r,
@@ -258,13 +258,13 @@ with tab1:
                 )
                 continue
 
-            pdf_bytes = generar_recibo(
-                nombre=r_nombre,
+            pdf_bytes = obtener_pdf_recibo(
+                num=ya['num'],
                 unidad=unidad,
+                nombre=r_nombre,
                 desc=rec['desc'],
                 monto=monto_recibo,
                 fecha_pago=r_fecha,
-                num_recibo=ya['num'],
                 forma_pago=r_forma,
             )
             fname = f"Recibo_{ya['num']}_{unidad}.pdf"

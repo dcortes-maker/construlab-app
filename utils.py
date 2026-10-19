@@ -13,6 +13,12 @@ _PROYECTOS_DB = {
     "villas_del_bosque": "villas-del-bosque",
 }
 BUCKET = "adjuntos"
+_sb_cliente = None
+
+def configurar_cliente(client):
+    """La API inyecta su cliente. Streamlit lo deja en None y usa secrets."""
+    global _sb_cliente
+    _sb_cliente = client
 
 def _proyecto_db() -> str:
     pid = st.session_state.get("proyecto", "riviera_park_2")
@@ -22,8 +28,19 @@ _excluir_matriz = ['separac', 'gasto', 'bonif', '⚠']
 
 
 def _sb() -> Client:
+    if _sb_cliente is not None:
+        return _sb_cliente
     cfg = st.secrets["supabase"]
     return create_client(cfg["url"], cfg["service_key"])
+
+
+def _soltar_cache():
+    """Fuera de Streamlit (la API, el respaldo) no hay caché que limpiar."""
+    for fn in (cargar_datos, cargar_reservas, clientes_con_contrato):
+        try:
+            fn.clear()
+        except Exception:
+            pass
 
 
 def _a_fecha(v):
@@ -178,7 +195,7 @@ def marcar_pago(record_id: int, fecha_pago: date, forma_pago: str = 'Transferenc
         'forma_pago': forma_pago,
         'referencia': f"Pagado - {fecha_pago.strftime('%d/%m/%Y')}",
     }).eq('id', record_id).execute()
-    cargar_datos.clear()
+    _soltar_cache()
 
 
 def desmarcar_pago(record_id: int):
@@ -188,7 +205,7 @@ def desmarcar_pago(record_id: int):
         'referencia': None,
     }).eq('id', record_id).execute()
     anular_recibo(record_id)
-    cargar_datos.clear()
+    _soltar_cache()
 
 
 def pago_parcial(record_id: int, monto_pagado: float, fecha_pago: date,
@@ -226,7 +243,7 @@ def pago_parcial(record_id: int, monto_pagado: float, fecha_pago: date,
             'monto':       saldo,
         }).execute()
 
-    cargar_datos.clear()
+    _soltar_cache()
     return saldo
 
 
@@ -236,22 +253,22 @@ def ajustar_monto_siguiente(record_id: int, excedente: float):
     if row:
         nuevo = max(0, float(row[0]['monto']) - excedente)
         sb.table('cuotas').update({'monto': round(nuevo, 2)}).eq('id', record_id).execute()
-    cargar_datos.clear()
+    _soltar_cache()
 
 
-def agregar_filas_plan_bulk(unidad: str, nombre: str, filas: list):
+def agregar_filas_plan_bulk(unidad: str, nombre: str, filas: list, proyecto: str = "") -> int:
     sb     = _sb()
-    GASTOS = {'Gasto Manejo', 'Gasto Legal'}
+    proyecto = proyecto or _proyecto_db()
 
-    existing = sb.table('cuotas').select('num_cuota,descripcion').eq('proyecto', _proyecto_db()).eq('unidad', unidad).execute().data
-    existentes = {(r['num_cuota'], (r['descripcion'] or '').strip() in GASTOS) for r in existing if r['num_cuota']}
+    existing = sb.table('cuotas').select('num_cuota,descripcion').eq('proyecto', proyecto).eq('unidad', unidad).execute().data
+    existentes = {(r['num_cuota'], (r['descripcion'] or '').strip()) for r in existing if r['num_cuota']}
 
     to_insert = []
     for f in filas:
-        clave = (int(f['num_cuota']), str(f['desc']).strip() in GASTOS)
+        clave = (int(f['num_cuota']), str(f['desc']).strip())
         if clave in existentes: continue
         rec = {
-            'proyecto': _proyecto_db(), 'unidad': unidad, 'nombre': nombre,
+            'proyecto': proyecto, 'unidad': unidad, 'nombre': nombre,
             'num_cuota': f['num_cuota'], 'descripcion': f['desc'], 'monto': f['monto'],
         }
         if f.get('fecha_venc'):
@@ -263,14 +280,15 @@ def agregar_filas_plan_bulk(unidad: str, nombre: str, filas: list):
     if to_insert:
         for i in range(0, len(to_insert), 100):
             sb.table('cuotas').insert(to_insert[i:i+100]).execute()
-    cargar_datos.clear()
+    _soltar_cache()
+    return len(to_insert)
 
 
 def eliminar_filas_plan(record_ids: list):
     sb = _sb()
     for rid in record_ids:
         sb.table('cuotas').delete().eq('id', rid).execute()
-    cargar_datos.clear()
+    _soltar_cache()
 
 
 def actualizar_fila_plan(record_id: int, desc: str, fecha_venc, monto: float):
@@ -279,12 +297,12 @@ def actualizar_fila_plan(record_id: int, desc: str, fecha_venc, monto: float):
         'fecha_venc':  fecha_venc.isoformat() if fecha_venc and hasattr(fecha_venc, 'isoformat') else None,
         'monto':       monto,
     }).eq('id', record_id).execute()
-    cargar_datos.clear()
+    _soltar_cache()
 
 
 def eliminar_plan(unidad: str):
     _sb().table('cuotas').delete().eq('proyecto', _proyecto_db()).eq('unidad', unidad).execute()
-    cargar_datos.clear()
+    _soltar_cache()
 
 
 def agregar_fila_plan(unidad: str, nombre: str, num_cuota, desc: str, fecha_venc, monto: float):
@@ -296,7 +314,7 @@ def agregar_fila_plan(unidad: str, nombre: str, num_cuota, desc: str, fecha_venc
     if fecha_venc:
         rec['fecha_venc'] = fecha_venc.isoformat() if hasattr(fecha_venc, 'isoformat') else str(fecha_venc)
     res = _sb().table('cuotas').insert(rec).execute()
-    cargar_datos.clear()
+    _soltar_cache()
     return res.data[0]['id'] if res.data else None
 
 
@@ -305,7 +323,7 @@ def reordenar_plan(ids_en_orden: list):
     sb = _sb()
     for pos, cid in enumerate(ids_en_orden, 1):
         sb.table('cuotas').update({'num_cuota': pos}).eq('id', int(cid)).execute()
-    cargar_datos.clear()
+    _soltar_cache()
 
 
 # ─── Reservas ──────────────────────────────────────────────────────
@@ -329,7 +347,7 @@ def guardar_reserva(nombre: str, unidad: str, monto: float, fecha, notas: str = 
     return res.data[0]['id']
 
 
-def migrar_reserva_a_plan(unidad: str) -> dict:
+def migrar_reserva_a_plan(unidad: str, proyecto: str = "") -> dict:
     """Al cargar el plan de un cliente en reserva: marca la cuota "Reserva" como
     pagada con la fecha y el monto de la reserva, y borra el registro de reservas
     para que el dinero no quede contado dos veces.
@@ -337,8 +355,9 @@ def migrar_reserva_a_plan(unidad: str) -> dict:
     Devuelve {} si la unidad no tenía reserva.
     """
     sb  = _sb()
+    proyecto = proyecto or _proyecto_db()
     res = sb.table('reservas').select('*') \
-            .eq('proyecto', _proyecto_db()).eq('unidad', unidad).execute().data
+            .eq('proyecto', proyecto).eq('unidad', unidad).execute().data
     if not res:
         return {}
     r          = res[0]
@@ -347,7 +366,7 @@ def migrar_reserva_a_plan(unidad: str) -> dict:
 
     # Cuota de reserva del plan (la primera cuyo concepto sea "Reserva")
     cuotas = sb.table('cuotas').select('id,num_cuota,descripcion,monto,fecha_pago') \
-               .eq('proyecto', _proyecto_db()).eq('unidad', unidad) \
+               .eq('proyecto', proyecto).eq('unidad', unidad) \
                .order('num_cuota').execute().data
     # "Reserva" o "Separación": ambos nombran el primer abono de reserva
     cuota = next((c for c in cuotas
@@ -364,8 +383,7 @@ def migrar_reserva_a_plan(unidad: str) -> dict:
         marcada = True
 
     sb.table('reservas').delete().eq('id', r['id']).execute()
-    cargar_reservas.clear()
-    cargar_datos.clear()
+    _soltar_cache()
     return {'monto': monto_res, 'fecha': fecha_res, 'marcada': marcada}
 
 
@@ -410,7 +428,8 @@ def clientes_con_contrato(proyecto: str = "") -> set:
         datos = cargar_datos(proyecto)
         for u, _ in datos['clientes']:
             for f in listar_adjuntos(u):
-                if 'contrato' in f['name'].lower():
+                nombre = f['name'].lower()
+                if 'contrato' in nombre or 'cpp' in nombre:
                     out.add(u)
                     break
     except Exception:
@@ -422,6 +441,7 @@ def subir_adjunto(unidad: str, filename: str, file_bytes: bytes) -> bool:
     sb     = _sb()
     folder = _folder(unidad)
     path   = f"{folder}/{filename}"
+    subir_adjunto.ultimo_error = ""
     try:
         sb.storage.from_(BUCKET).remove([path])
     except Exception:
@@ -433,7 +453,11 @@ def subir_adjunto(unidad: str, filename: str, file_bytes: bytes) -> bool:
         )
         return True
     except Exception as e:
-        st.error(f"Error al subir archivo: {e}")
+        subir_adjunto.ultimo_error = str(e)
+        try:
+            st.error(f"Error al subir archivo: {e}")
+        except Exception:
+            pass
         return False
 
 
@@ -443,6 +467,71 @@ def descargar_adjunto(unidad: str, filename: str) -> bytes:
 
 def eliminar_adjunto(unidad: str, filename: str):
     _sb().storage.from_(BUCKET).remove([f"{_folder(unidad)}/{filename}"])
+
+
+def clasificar_documento(filename: str) -> str:
+    """contrato, anexo, o vacío si el archivo no entra en el respaldo de Drive."""
+    n = (filename or "").lower()
+    if "contrato" in n or "cpp" in n:
+        return "contrato"
+    if n.startswith("plan_de_pagos") or "anexo" in n or "plan de pago" in n:
+        return "anexo"
+    return ""
+
+
+def listar_unidades(proyecto: str) -> list:
+    """Unidades con plan o reserva. Sirve a la API, sin la caché de Streamlit."""
+    sb = _sb()
+    vistos = {}
+    rows = sb.table('cuotas').select('unidad,nombre').eq('proyecto', proyecto).limit(5000).execute().data or []
+    for r in rows:
+        if r.get('unidad') and r['unidad'] not in vistos:
+            vistos[r['unidad']] = r.get('nombre') or ''
+    reservas = sb.table('reservas').select('unidad,nombre').eq('proyecto', proyecto).limit(1000).execute().data or []
+    for r in reservas:
+        if r.get('unidad'):
+            vistos.setdefault(r['unidad'], r.get('nombre') or '')
+    return [{'unidad': u, 'nombre': n} for u, n in sorted(vistos.items())]
+
+
+def ruta_pdf_recibo(num: int, unidad: str) -> str:
+    return f"recibos/{_folder(unidad)}/Recibo_{num}.pdf"
+
+
+def guardar_pdf_recibo(num: int, unidad: str, pdf_bytes: bytes) -> bool:
+    """Deja el PDF tal cual se emitió. El respaldo copia este archivo."""
+    sb   = _sb()
+    path = ruta_pdf_recibo(num, unidad)
+    try:
+        sb.storage.from_(BUCKET).remove([path])
+    except Exception:
+        pass
+    try:
+        sb.storage.from_(BUCKET).upload(
+            path, pdf_bytes,
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+        return True
+    except Exception:
+        return False
+
+
+def leer_pdf_recibo(num: int, unidad: str):
+    try:
+        return _sb().storage.from_(BUCKET).download(ruta_pdf_recibo(num, unidad))
+    except Exception:
+        return None
+
+
+def obtener_pdf_recibo(num: int, unidad: str, nombre: str, desc: str, monto: float,
+                       fecha_pago, forma_pago: str = 'Transferencia') -> bytes:
+    """Devuelve el PDF guardado. Si todavía no existe, lo genera y lo guarda."""
+    ya = leer_pdf_recibo(num, unidad)
+    if ya:
+        return ya
+    pdf = generar_recibo(nombre, unidad, desc, monto, fecha_pago, num, forma_pago)
+    guardar_pdf_recibo(num, unidad, pdf)
+    return pdf
 
 
 # ─── Generación de PDFs ────────────────────────────────────────────

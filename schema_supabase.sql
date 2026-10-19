@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS cuotas (
     unidad      TEXT NOT NULL,
     nombre      TEXT NOT NULL,
     num_cuota   INTEGER,
-    desc        TEXT DEFAULT '',
+    descripcion TEXT DEFAULT '',
     fecha_venc  DATE,
     monto       NUMERIC(12,2) NOT NULL DEFAULT 0,
     fecha_pago  DATE,
@@ -47,7 +47,43 @@ CREATE INDEX IF NOT EXISTS idx_cuotas_unidad      ON cuotas(unidad);
 CREATE INDEX IF NOT EXISTS idx_cuotas_fecha_pago  ON cuotas(fecha_pago);
 CREATE INDEX IF NOT EXISTS idx_reservas_proyecto  ON reservas(proyecto);
 
+-- Recibos emitidos. El PDF vive en Storage: recibos/{unidad}/Recibo_{num}.pdf
+CREATE TABLE IF NOT EXISTS recibos (
+    num       INTEGER PRIMARY KEY,
+    cuota_id  INTEGER,
+    unidad    TEXT,
+    nombre    TEXT,
+    "desc"    TEXT,
+    monto     NUMERIC(12,2),
+    fecha     TEXT,
+    estado    TEXT DEFAULT 'emitido',
+    proyecto  TEXT,
+    forma     TEXT
+);
+
+-- Consecutivo de recibos. La fila nombre='recibo' arranca en 1020.
+CREATE TABLE IF NOT EXISTS contadores (
+    nombre  TEXT PRIMARY KEY,
+    valor   INTEGER NOT NULL
+);
+
+-- Llaves para que otras apps suban contratos y anexos.
+-- Hasta crear esta tabla, la app guarda los hashes en Storage: sistema/api_claves.json
+CREATE TABLE IF NOT EXISTS api_claves (
+    id          TEXT PRIMARY KEY,
+    etiqueta    TEXT NOT NULL,
+    key_hash    TEXT NOT NULL UNIQUE,
+    prefijo     TEXT NOT NULL,
+    activa      BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_por  TEXT DEFAULT '',
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    ultimo_uso  TIMESTAMPTZ
+);
+
 -- Deshabilitar RLS (el service_key tiene acceso completo)
-ALTER TABLE cuotas   DISABLE ROW LEVEL SECURITY;
-ALTER TABLE reservas DISABLE ROW LEVEL SECURITY;
-ALTER TABLE usuarios DISABLE ROW LEVEL SECURITY;
+ALTER TABLE cuotas     DISABLE ROW LEVEL SECURITY;
+ALTER TABLE reservas   DISABLE ROW LEVEL SECURITY;
+ALTER TABLE usuarios   DISABLE ROW LEVEL SECURITY;
+ALTER TABLE recibos    DISABLE ROW LEVEL SECURITY;
+ALTER TABLE contadores DISABLE ROW LEVEL SECURITY;
+ALTER TABLE api_claves DISABLE ROW LEVEL SECURITY;

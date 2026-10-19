@@ -1,0 +1,10 @@
+# Servicio cron del respaldo a Drive.
+# En Railway, el servicio "respaldo-drive" debe apuntar su config-as-code a este archivo.
+# 00:00 UTC = 7:00 p.m. en Panamá. El proceso tiene que terminar: si se queda abierto, no vuelve a correr.
+[build]
+builder = "RAILPACK"
+
+[deploy]
+startCommand = "python scripts/respaldo_documentos_drive.py"
+cronSchedule = "0 0 * * *"
+restartPolicyType = "NEVER"

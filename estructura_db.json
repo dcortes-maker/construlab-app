@@ -72,9 +72,44 @@
         "rol": { "tipo": "TEXT", "restricciones": "NOT NULL", "default": "usuario" },
         "created_at": { "tipo": "TIMESTAMPTZ", "default": "NOW()" }
       }
+    },
+    "recibos": {
+      "descripcion": "Recibos de pago emitidos. El PDF no está en la fila: se guarda en Storage en recibos/{unidad}/Recibo_{num}.pdf.",
+      "columnas": {
+        "num": { "tipo": "INTEGER", "restricciones": "PRIMARY KEY" },
+        "cuota_id": { "tipo": "INTEGER" },
+        "unidad": { "tipo": "TEXT" },
+        "nombre": { "tipo": "TEXT" },
+        "desc": { "tipo": "TEXT", "descripcion": "Concepto del recibo. Esta tabla sí usa 'desc', no 'descripcion'." },
+        "monto": { "tipo": "NUMERIC(12,2)" },
+        "fecha": { "tipo": "TEXT" },
+        "estado": { "tipo": "TEXT", "descripcion": "emitido o anulado. El número no se reutiliza." },
+        "proyecto": { "tipo": "TEXT" },
+        "forma": { "tipo": "TEXT" }
+      }
+    },
+    "contadores": {
+      "descripcion": "Consecutivos. La fila nombre='recibo' es el último número emitido; el primero fue 1020.",
+      "columnas": {
+        "nombre": { "tipo": "TEXT", "restricciones": "PRIMARY KEY" },
+        "valor": { "tipo": "INTEGER", "restricciones": "NOT NULL" }
+      }
+    },
+    "api_claves": {
+      "descripcion": "Hashes de las llaves con las que otras apps suben PDF. El SQL está en schema_supabase.sql. Mientras la tabla no exista en Supabase, los hashes viven en Storage, archivo sistema/api_claves.json.",
+      "columnas": {
+        "id": { "tipo": "TEXT", "restricciones": "PRIMARY KEY" },
+        "etiqueta": { "tipo": "TEXT", "restricciones": "NOT NULL" },
+        "key_hash": { "tipo": "TEXT", "restricciones": "UNIQUE NOT NULL" },
+        "prefijo": { "tipo": "TEXT", "restricciones": "NOT NULL" },
+        "activa": { "tipo": "BOOLEAN", "default": true },
+        "creado_por": { "tipo": "TEXT" },
+        "created_at": { "tipo": "TIMESTAMPTZ" },
+        "ultimo_uso": { "tipo": "TIMESTAMPTZ", "nullable": true }
+      }
     }
   },
   "seguridad": {
-    "rls": "Deshabilitado en las tres tablas; el acceso se hace con la service_key de Supabase desde la app Streamlit."
+    "rls": "Deshabilitado. El acceso se hace con la service_key de Supabase desde la app Streamlit y desde la API."
   }
 }

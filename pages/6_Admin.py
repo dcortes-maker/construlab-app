@@ -109,6 +109,74 @@ with st.expander("Nuevo usuario", expanded=False):
                         st.session_state.pop(k, None)
                     st.rerun()
 
+# ── Llaves de la API ──────────────────────────────────────────────
+st.markdown("---")
+st.markdown("### 🔑 Llaves para otras apps")
+st.caption(
+    "Otra aplicación usa la llave para subir PDF de contratos y anexos de pago. "
+    "La llave completa se muestra una sola vez. Aquí solo queda el inicio, para reconocerla."
+)
+
+from api import claves as claves_api
+from utils import _sb
+
+if st.session_state.get("clave_nueva"):
+    st.success("Copia esta llave ahora. No se vuelve a mostrar.")
+    st.code(st.session_state["clave_nueva"], language=None)
+    if st.button("Ya la copié", key="clave_copiada"):
+        st.session_state.pop("clave_nueva", None)
+        st.rerun()
+
+with st.expander("Generar una llave", expanded=False):
+    etiq = st.text_input("Nombre de la app que se va a conectar", key="etiq_clave").strip()
+    if st.button("Generar llave", type="primary", key="btn_clave"):
+        if not etiq:
+            st.error("Ponle un nombre para saber de qué app es.")
+        else:
+            st.session_state["clave_nueva"] = claves_api.crear(
+                _sb(), etiq, st.session_state.get("usuario", "")
+            )
+            st.rerun()
+
+claves = claves_api.listar(_sb())
+if not claves:
+    st.info("Todavía no hay llaves.")
+else:
+    for c in claves:
+        col_a, col_b = st.columns([4, 1])
+        estado = "activa" if c.get("activa") else "revocada"
+        with col_a:
+            st.markdown(
+                f"**{c.get('etiqueta', '—')}** · `{c.get('prefijo', '')}…` · {estado}"
+            )
+            st.caption(f"Último uso: {c.get('ultimo_uso') or 'nunca'}")
+        with col_b:
+            if c.get("activa") and st.button("Revocar", key=f"rev_{c['id']}"):
+                claves_api.revocar(_sb(), c["id"])
+                st.rerun()
+
+with st.expander("Crear la tabla en Supabase (una vez)"):
+    st.markdown(
+        "Hoy las llaves se guardan en el bucket privado, archivo `sistema/api_claves.json`, "
+        "porque la tabla `api_claves` todavía no está creada. Cuando pegues este SQL en "
+        "Supabase → SQL Editor, la app pasa a usar la tabla sola. Las llaves ya creadas "
+        "en el archivo no se copian: genera una nueva después de crear la tabla."
+    )
+    st.code(
+        """CREATE TABLE IF NOT EXISTS api_claves (
+    id          TEXT PRIMARY KEY,
+    etiqueta    TEXT NOT NULL,
+    key_hash    TEXT NOT NULL UNIQUE,
+    prefijo     TEXT NOT NULL,
+    activa      BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_por  TEXT DEFAULT '',
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    ultimo_uso  TIMESTAMPTZ
+);
+ALTER TABLE api_claves DISABLE ROW LEVEL SECURITY;""",
+        language="sql",
+    )
+
 # ── Resumen de permisos ───────────────────────────────────────────
 st.markdown("---")
 st.markdown("### 📋 Resumen de permisos")
@@ -128,4 +196,5 @@ st.markdown("""
 | **Eliminar reservas** | ✅ | ❌ |
 | Descargar Reportes Excel | ✅ | ✅ |
 | **Panel de Administración** | ✅ | ❌ |
+| **Llaves de la API** | ✅ | ❌ |
 """)

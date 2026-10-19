@@ -1,0 +1,10 @@
+# Servicio de la API. Railway lo usa por defecto.
+# El respaldo a Drive es otro servicio del mismo repo: railway.cron.toml
+[build]
+builder = "RAILPACK"
+
+[deploy]
+startCommand = "sh -c 'python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}'"
+healthcheckPath = "/v1/salud"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
