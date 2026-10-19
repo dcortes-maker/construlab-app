@@ -12,7 +12,7 @@ Este archivo se actualiza antes de cada `git push`. Es el mapa que el agente lee
 
 | Plataforma | Cómo se usa |
 |---|---|
-| Streamlit | Toda la interfaz. `streamlit run inicio.py`, puerto 8501, tema oscuro en `.streamlit/config.toml`. |
+| Streamlit | Toda la interfaz. `streamlit run inicio.py`, puerto 8501, tema oscuro en `.streamlit/config.toml`. La app en vivo está en https://construlab-app-5dcduvha8grjn69qbbvcnu.streamlit.app — esa es la dirección que usa el equipo. |
 | Supabase | PostgreSQL y los archivos. La app entra con la `service_key` de `.streamlit/secrets.toml`. Ese archivo no va a GitHub. RLS está apagado. |
 | GitHub | Código en `dcortes-maker/construlab-app`, rama `main`. Subir ahí es lo que actualiza la app online. El remoto no lleva token en la URL. |
 | Google Drive | Construlab → Proyectos → `1. PROYECTO RIVIERA PARK` → `Riviera Par App de abonos`. Una carpeta por apartamento, con su contrato, su anexo y sus recibos. |

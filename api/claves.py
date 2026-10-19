@@ -6,6 +6,8 @@ en Supabase), los hashes viven en el bucket privado, archivo sistema/api_claves.
 import hashlib
 import json
 import secrets
+import time
+import urllib.request
 from datetime import datetime, timezone
 
 from utils import BUCKET
@@ -29,23 +31,45 @@ def _tabla_disponible(sb) -> bool:
 
 
 def _leer_json(sb) -> list:
+    """Lee la lista de llaves saltándose la caché.
+
+    No usa storage.download(): esa ruta se sirve cacheada y devuelve la lista
+    anterior, así que validar() rechazaría llaves recién creadas y crear()
+    escribiría encima de las ya emitidas. Una URL firmada con un parámetro
+    distinto en cada llamada siempre trae el archivo real.
+
+    Solo devuelve vacío si el archivo todavía no existe. Cualquier otro fallo
+    estalla: tragárselo es lo que borraría las llaves.
+    """
     try:
-        raw = sb.storage.from_(BUCKET).download(RUTA_JSON)
-        data = json.loads(raw.decode())
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+        firmada = sb.storage.from_(BUCKET).create_signed_url(RUTA_JSON, 60)["signedURL"]
+    except Exception as e:
+        msg = str(e).lower()
+        if "not found" in msg or "404" in msg or "does not exist" in msg:
+            return []
+        raise
+    sep = "&" if "?" in firmada else "?"
+    pedido = urllib.request.Request(
+        f"{firmada}{sep}cb={time.time_ns()}",
+        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    )
+    with urllib.request.urlopen(pedido, timeout=30) as resp:
+        data = json.loads(resp.read().decode())
+    return data if isinstance(data, list) else []
 
 
 def _escribir_json(sb, rows: list):
+    # Sin cache-control, Supabase cachea el archivo una hora: validar() seguiría
+    # leyendo la lista vieja y rechazaría llaves recién creadas. Y sin borrar
+    # antes, porque upsert ya reemplaza y el borrado deja un hueco sin archivo.
     blob = json.dumps(rows, ensure_ascii=False).encode()
-    try:
-        sb.storage.from_(BUCKET).remove([RUTA_JSON])
-    except Exception:
-        pass
     sb.storage.from_(BUCKET).upload(
         RUTA_JSON, blob,
-        file_options={"content-type": "application/json", "upsert": "true"},
+        file_options={
+            "content-type": "application/json",
+            "upsert": "true",
+            "cache-control": "0",
+        },
     )
 
 

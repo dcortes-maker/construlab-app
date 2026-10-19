@@ -5,7 +5,9 @@
 
 cd "$(dirname "$0")/.." || exit 1
 
-PY=/usr/bin/python3
+# En esta Mac es el python del sistema. En GitHub Actions se manda PYTHON_BIN,
+# porque ahí las librerias se instalan contra otro interprete.
+PY="${PYTHON_BIN:-/usr/bin/python3}"
 fallo=0
 
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') ====="
