@@ -19,7 +19,7 @@ DRIVE_SINCRONIZADO = Path(
     "GoogleDrive-dcortes@construlab.com.pa/"
     "Unidades compartidas/Construlab/Proyectos"
 )
-DRIVE_VILLAS = ""   # pendiente: falta compartirle esa carpeta al robot
+DRIVE_VILLAS = "1avJp3M2X0XkYTDbLJDncaUZZFv2ysLMS"
 
 # Una torre es un proyecto aparte. Los números de apartamento se repiten entre
 # torres —el 3-C existe en las cuatro— y si compartieran proyecto se mezclarían
