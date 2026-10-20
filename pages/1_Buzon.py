@@ -127,39 +127,53 @@ if sin_plan:
                "Al aceptarlos quedan creados en la app con su contrato guardado y la "
                "alerta «Sin plan de pagos», para cargarles el plan después.")
 
-    st.dataframe(
-        pd.DataFrame([{
-            'Apto': p['unidad'],
-            'Cliente': p['nombre'],
-            'Qué hay en Drive': 'Contrato' if p['tipo'] == 'contrato' else 'Anexo (escaneado)',
-            'Archivo': p['archivo'],
-        } for p in sin_plan]),
-        use_container_width=True, hide_index=True,
-    )
+    ANCHOS = [1, 3.2, 3.4, 1.1, 1, 1]
+    enc = st.columns(ANCHOS)
+    for col, titulo in zip(enc, ['Apto', 'Cliente', 'Archivo en Drive', '', '', '']):
+        col.caption(f"**{titulo}**" if titulo else "")
 
-    if ES_ADMIN:
-        st.markdown("#### Aceptar uno")
-        op = {f"{p['unidad']} — {p['nombre']}": p for p in sin_plan}
-        sel = st.selectbox("¿A quién aceptas?", list(op.keys()), key="aceptar_sp")
-        p = op[sel]
+    for p in sin_plan:
+        fila = st.columns(ANCHOS, vertical_alignment="center")
+        editando = st.session_state.get(f"edit_{p['id']}", False)
 
-        a, b = st.columns(2)
-        u = a.text_input("Apartamento", value=p['unidad'], key=f"su_{p['id']}")
-        n = b.text_input("Cliente", value=p['nombre'], key=f"sn_{p['id']}")
-        st.caption(f"Se creará **{u} — {n}** con su documento «{p['archivo']}» "
-                   f"y la alerta de plan pendiente.")
+        fila[0].markdown(f"**{p['unidad']}**")
+        fila[1].markdown(p['nombre'])
+        fila[2].caption(p['archivo'])
 
-        x, y = st.columns(2)
-        if x.button("✅ Aceptar y crear en la app", type="primary", key=f"sok_{p['id']}"):
-            res = aprobar_propuesta(p['id'], u, n, st.session_state.get('nombre', ''))
+        if not ES_ADMIN:
+            continue
+
+        if fila[3].button("Aceptar", key=f"ac_{p['id']}", type="primary",
+                          use_container_width=True):
+            res = aprobar_propuesta(p['id'], p['unidad'], p['nombre'],
+                                    st.session_state.get('nombre', ''))
             if res['ok']:
-                doc = f" Documento guardado como «{res['documento']}»." if res['documento'] else ""
                 st.success(f"{res['nombre']} creado en {res['unidad']}, "
-                           f"marcado sin plan de pagos.{doc}")
+                           f"marcado sin plan de pagos.")
                 st.rerun()
             else:
                 st.error(res['motivo'])
-        if y.button("Quitar del buzón", key=f"sno_{p['id']}",
-                    help="Úsalo si ese cliente no va, o si ya lo cargaste a mano."):
+
+        if fila[4].button("Editar", key=f"ed_{p['id']}", use_container_width=True):
+            st.session_state[f"edit_{p['id']}"] = not editando
+            st.rerun()
+
+        if fila[5].button("Quitar", key=f"qu_{p['id']}", use_container_width=True,
+                          help="Si ese cliente no va, o ya lo cargaste a mano."):
             descartar_propuesta(p['id'], st.session_state.get('nombre', ''))
             st.rerun()
+
+        if editando:
+            a, b, c = st.columns([2, 4, 2], vertical_alignment="bottom")
+            u = a.text_input("Apartamento", value=p['unidad'], key=f"u2_{p['id']}")
+            n = b.text_input("Cliente", value=p['nombre'], key=f"n2_{p['id']}")
+            if c.button("Guardar y aceptar", key=f"ga_{p['id']}", type="primary",
+                        use_container_width=True):
+                res = aprobar_propuesta(p['id'], u, n, st.session_state.get('nombre', ''))
+                if res['ok']:
+                    st.session_state.pop(f"edit_{p['id']}", None)
+                    st.success(f"{res['nombre']} creado en {res['unidad']}.")
+                    st.rerun()
+                else:
+                    st.error(res['motivo'])
+        st.divider()
