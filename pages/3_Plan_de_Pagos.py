@@ -218,8 +218,8 @@ if seccion == "📄 Ver Plan":
                     st.session_state.pop('mostrar_ec', None)
                     st.rerun()
 
-    # Retirar del proyecto (solo admin)
-    if st.session_state.get('rol') == 'admin' and sel != "Todos":
+    # Retirar del proyecto: lo puede hacer cualquier usuario
+    if sel != "Todos":
         unidad_r = sel.split(" — ")[0]
         abonado_r = sum(f['monto'] for f in filas if f['fp'])
 

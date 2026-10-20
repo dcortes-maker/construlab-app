@@ -37,10 +37,6 @@ if not propuestas:
                "suban el archivo original.")
     st.stop()
 
-ES_ADMIN = st.session_state.get('rol') == 'admin'
-if not ES_ADMIN:
-    st.info("Solo el administrador puede aprobar. Esto es lo que hay pendiente:")
-
 for p in propuestas:
     titulo = f"**{p['unidad']}**"
     if p.get('nombre'):
@@ -57,11 +53,6 @@ for p in propuestas:
             'Fecha Venc.': pd.to_datetime(c['fecha_venc'], errors='coerce'),
             'Monto ($)': float(c['monto'] or 0),
         } for c in p['cuotas']])
-
-        if not ES_ADMIN:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            st.markdown(f"**Total del plan: ${p['total']:,.2f}**")
-            continue
 
         a, b = st.columns(2)
         u = a.text_input("Apartamento", value=p['unidad'], key=f"u_{p['id']}")

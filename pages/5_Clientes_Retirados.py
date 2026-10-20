@@ -16,7 +16,6 @@ st.caption("Quienes salieron del proyecto. Nada se borra: su plan y sus recibos 
 
 st.markdown("---")
 
-ES_ADMIN = st.session_state.get('rol') == 'admin'
 retirados = listar_retirados(_proyecto_db())
 
 # Dos cosas distintas: si al cliente le toca devolución, y si el banco ya la hizo.
@@ -59,10 +58,6 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
 )
-
-if not ES_ADMIN:
-    st.info("Solo el administrador puede registrar devoluciones o reingresar a un cliente.")
-    st.stop()
 
 st.markdown("---")
 

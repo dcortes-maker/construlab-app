@@ -59,51 +59,52 @@ if reservas:
         hide_index=True,
     )
 
+    # Subir el comprobante y retirar del proyecto los hace cualquier usuario.
+    faltan = [r for r in reservas if r['unidad'] not in con_comp]
+    if faltan:
+        with st.expander(f"📎 Subir comprobante que falta ({len(faltan)})", expanded=False):
+            op_c = {f"{r['unidad']} — {r['nombre']} — ${r['monto']:,.2f}": r for r in faltan}
+            sel_c = st.selectbox("¿De quién es el comprobante?", list(op_c.keys()), key="sel_cmp")
+            r_c = op_c[sel_c]
+            arch = st.file_uploader("Comprobante (PDF o foto)",
+                                    type=['pdf', 'png', 'jpg', 'jpeg'], key="cmp_viejo")
+            if st.button("Guardar comprobante") and arch is not None:
+                ext = arch.name.rsplit('.', 1)[-1].lower()
+                subir_adjunto(r_c['unidad'],
+                              f"Comprobante_{r_c['unidad'].replace('/', '-')}_{r_c['fecha']}.{ext}",
+                              arch.getvalue())
+                unidades_con_comprobante.clear()
+                st.success(f"Comprobante de {r_c['nombre']} guardado.")
+                st.rerun()
+
+    with st.expander("📤 Retirar del proyecto"):
+        st.caption("El cliente sale de esta lista pero queda guardado en Clientes retirados, "
+                   "con su abono y el estado de su devolución.")
+        op_ret = {f"[{r['id']}] {r['nombre']} — {r['unidad']} — ${r['monto']:,.2f}": r
+                  for r in reservas}
+        sel_ret = st.selectbox("¿A quién retiras?", list(op_ret.keys()), key="sel_ret")
+        r_sel = op_ret[sel_ret]
+
+        motivo_ret = st.text_input("Motivo (opcional)", key="motivo_ret")
+        devol_ret = st.radio(
+            "¿Se le devuelve la reserva?",
+            ["No aplica devolución", "Aplica devolución"],
+            key="devol_ret",
+            help="Si aplica, queda pendiente hasta que registres la transferencia "
+                 "en la pantalla de Clientes retirados.",
+        )
+
+        if st.button("📤 Retirar del proyecto", type="primary"):
+            res = retirar_reserva(r_sel['id'], motivo_ret,
+                                  devol_ret == "Aplica devolución",
+                                  st.session_state.get('nombre', ''))
+            if res['ok']:
+                st.success(f"{res['nombre']} retirado del proyecto.")
+                st.rerun()
+            else:
+                st.error(res['motivo'])
+
     if st.session_state.get('rol') == 'admin':
-        faltan = [r for r in reservas if r['unidad'] not in con_comp]
-        if faltan:
-            with st.expander(f"📎 Subir comprobante que falta ({len(faltan)})", expanded=False):
-                op_c = {f"{r['unidad']} — {r['nombre']} — ${r['monto']:,.2f}": r for r in faltan}
-                sel_c = st.selectbox("¿De quién es el comprobante?", list(op_c.keys()), key="sel_cmp")
-                r_c = op_c[sel_c]
-                arch = st.file_uploader("Comprobante (PDF o foto)",
-                                        type=['pdf', 'png', 'jpg', 'jpeg'], key="cmp_viejo")
-                if st.button("Guardar comprobante") and arch is not None:
-                    ext = arch.name.rsplit('.', 1)[-1].lower()
-                    subir_adjunto(r_c['unidad'],
-                                  f"Comprobante_{r_c['unidad'].replace('/', '-')}_{r_c['fecha']}.{ext}",
-                                  arch.getvalue())
-                    unidades_con_comprobante.clear()
-                    st.success(f"Comprobante de {r_c['nombre']} guardado.")
-                    st.rerun()
-
-        with st.expander("📤 Retirar del proyecto"):
-            st.caption("El cliente sale de esta lista pero queda guardado en Clientes retirados, "
-                       "con su abono y el estado de su devolución.")
-            op_ret = {f"[{r['id']}] {r['nombre']} — {r['unidad']} — ${r['monto']:,.2f}": r
-                      for r in reservas}
-            sel_ret = st.selectbox("¿A quién retiras?", list(op_ret.keys()), key="sel_ret")
-            r_sel = op_ret[sel_ret]
-
-            motivo_ret = st.text_input("Motivo (opcional)", key="motivo_ret")
-            devol_ret = st.radio(
-                "¿Se le devuelve la reserva?",
-                ["No aplica devolución", "Aplica devolución"],
-                key="devol_ret",
-                help="Si aplica, queda pendiente hasta que registres la transferencia "
-                     "en la pantalla de Clientes retirados.",
-            )
-
-            if st.button("📤 Retirar del proyecto", type="primary"):
-                res = retirar_reserva(r_sel['id'], motivo_ret,
-                                      devol_ret == "Aplica devolución",
-                                      st.session_state.get('nombre', ''))
-                if res['ok']:
-                    st.success(f"{res['nombre']} retirado del proyecto.")
-                    st.rerun()
-                else:
-                    st.error(res['motivo'])
-
         with st.expander("🗑 Eliminar una reserva"):
             opciones = {f"[{r['id']}] {r['nombre']} — {r['unidad']}": r['id'] for r in reservas}
             sel_del = st.selectbox("Selecciona la reserva a eliminar", list(opciones.keys()))
