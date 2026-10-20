@@ -74,6 +74,33 @@ Solo PDF, hasta 20 MB. Proyecto por defecto `riviera-park-2`. El otro valor vál
 
 Streamlit Cloud no publica esta API. El host es Railway.
 
+## Reglas que no se saltan
+
+Valen igual por las tres puertas por donde entra un plan: a mano en Plan de
+Pagos, aprobando en el Buzón, y la API que usan las apps de los socios.
+
+**Un apartamento, un cliente.** No se puede crear una reserva ni una carta
+promesa en una unidad ocupada. Para dársela a otra persona hay que retirar antes
+a la actual, diciendo si le aplica devolución. Lo hace cumplir
+`quien_ocupa()`, que llama `guardar_reserva()` y `agregar_filas_plan_bulk()`.
+Pasó lo contrario en 4-F y 1-F: dos reservas de personas distintas en la misma
+unidad, y ahí el dinero ya no es de nadie en particular.
+
+**Al cargar el plan, la reserva se va con él.** `migrar_reserva_a_plan()` marca
+la cuota de Reserva como pagada con la fecha y el monto originales, y borra la
+fila de reservas. Si no, el abono se cuenta dos veces: en Reservas y en los
+abonos del CPP. Se le pasa el nombre del cliente para no llevarle la reserva de
+otro; si no puede estar seguro, no toca ninguna y avisa.
+
+**Lo automático propone, una persona aprueba.** Lo que se lee de Drive queda en
+el buzón como propuesta, con las cuotas editables, y solo al aprobar se crea.
+Un anexo escaneado no se propone: no hay cuotas que leer.
+
+**Retirar no borra.** Las filas del cliente pasan a `<proyecto>#retirado#<id>` y
+su reserva viva se va con él. Sin devolución el abono sigue sumando al total,
+bajo «De retirados»; con devolución sale del total y queda pendiente hasta que
+alguien confirme la transferencia.
+
 ## Copia en Drive
 
 Son dos respaldos que corren juntos todas las noches a las 7:00 p.m. de Panamá, lanzados por `scripts/respaldo_diario.sh`:

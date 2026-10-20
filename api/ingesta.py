@@ -59,7 +59,9 @@ def cargar_anexo(data: bytes, filename: str, unidad: str, nombre: str, proyecto:
     if not subir_adjunto(unidad, fname, data):
         detalle = getattr(subir_adjunto, "ultimo_error", "") or "no se pudo guardar el archivo"
         raise RuntimeError(f"Las cuotas se registraron, pero el PDF no quedó guardado: {detalle}")
-    mig = migrar_reserva_a_plan(unidad, proyecto=proyecto)
+    # Con el nombre, para no llevarle a este cliente la reserva de otro si el
+    # apartamento tuviera más de una.
+    mig = migrar_reserva_a_plan(unidad, proyecto=proyecto, nombre=nombre)
     return {
         "proyecto": proyecto,
         "unidad": unidad,
@@ -68,7 +70,9 @@ def cargar_anexo(data: bytes, filename: str, unidad: str, nombre: str, proyecto:
         "cuotas_leidas": len(filas),
         "cuotas_nuevas": insertadas,
         "cuotas": [_fila(f) for f in filas],
-        "reserva_migrada": bool(mig),
+        "reserva_migrada": bool(mig) and not mig.get("ambiguo"),
+        "aviso": ("Ese apartamento tiene más de una reserva y no se pudo saber cuál "
+                  "es la suya: ninguna se tocó." if mig.get("ambiguo") else None),
     }
 
 
