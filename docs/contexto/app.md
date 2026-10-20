@@ -110,6 +110,11 @@ Son dos respaldos que corren juntos todas las noches a las 7:00 p.m. de Panamá,
 
 Quien lo dispara en esta Mac es `com.construlab.respaldo-riviera` (en `~/Library/LaunchAgents`). El log queda en `/Users/daylincortes/Respaldos_Riviera_Park/diario/salida.log`.
 
+`scripts/revisar_drive.py` corre además por su cuenta a las **7:00 a.m.**, con
+`com.construlab.revisar-drive` y su log en `diario/revision.log`. Esa es la
+corrida que importa: deja el buzón listo antes de que llegue el equipo. La de
+las 7 p.m. es la segunda pasada, por si dejaron algo durante el día.
+
 Para escribir dentro de `~/Library/CloudStorage` desde una tarea de launchd, `/bin/bash` necesita Acceso a disco completo en Ajustes del Sistema. Sin ese permiso el proceso puede leer pero no crear ni modificar nada en la carpeta de Drive, y falla con `PermissionError: Operation not permitted`. Por lo mismo, los dos scripts escriben directo al archivo destino: pasar por un `.tmp` y renombrar también está prohibido ahí.
 
 El cron de Railway (`railway.cron.toml`) sigue sin montarse: el proyecto no está creado y falta la cuenta de servicio de Google. Mientras tanto el respaldo depende de que esta Mac esté encendida a las 7:00 p.m.
