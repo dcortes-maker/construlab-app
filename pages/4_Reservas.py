@@ -142,7 +142,11 @@ if st.session_state.get('rol') == 'admin':
         elif comp_r is None:
             st.error("Falta el comprobante de pago. Sin él la reserva no queda respaldada.")
         else:
-            guardar_reserva(nombre_r, unidad_r, monto_r, fecha_r, notas_r)
+            try:
+                guardar_reserva(nombre_r, unidad_r, monto_r, fecha_r, notas_r)
+            except ValueError as e:
+                st.error(str(e))
+                st.stop()
             ext = comp_r.name.rsplit('.', 1)[-1].lower()
             subir_adjunto(unidad_r,
                           f"Comprobante_{unidad_r.replace('/', '-')}_{fecha_r.isoformat()}.{ext}",

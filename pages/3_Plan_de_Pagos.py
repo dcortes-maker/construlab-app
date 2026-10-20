@@ -424,7 +424,11 @@ if seccion == "📎 Cargar Plan de Pago":
             col_a, col_b = st.columns([1, 4])
             with col_a:
                 if st.button("✅ Guardar plan", type="primary", use_container_width=True):
-                    agregar_filas_plan_bulk(unidad_prev, nombre_prev, filas_a_guardar)
+                    try:
+                        agregar_filas_plan_bulk(unidad_prev, nombre_prev, filas_a_guardar)
+                    except ValueError as e:
+                        st.error(str(e))
+                        st.stop()
                     # Si venía de reserva: marca la cuota "Reserva" como pagada
                     # y saca el registro de reservas (evita contar el dinero dos veces).
                     mig = migrar_reserva_a_plan(unidad_prev, nombre=nombre_prev)

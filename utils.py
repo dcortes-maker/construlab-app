@@ -264,6 +264,14 @@ def agregar_filas_plan_bulk(unidad: str, nombre: str, filas: list, proyecto: str
     sb     = _sb()
     proyecto = proyecto or _proyecto_db()
 
+    # Un apartamento, un cliente. Si ya hay otro, hay que retirarlo antes.
+    ocupa = quien_ocupa(unidad, proyecto)
+    if ocupa and ocupa['nombre'] and not _mismas_personas(ocupa['nombre'], nombre):
+        raise ValueError(
+            f"El apartamento {unidad} ya es de {ocupa['nombre']} ({ocupa['donde']}). "
+            f"Para cargarle la carta promesa a {nombre} hay que retirar antes a quien "
+            f"lo tiene, indicando si le aplica devolución.")
+
     existing = sb.table('cuotas').select('num_cuota,descripcion').eq('proyecto', proyecto).eq('unidad', unidad).execute().data
     existentes = {(r['num_cuota'], (r['descripcion'] or '').strip()) for r in existing if r['num_cuota']}
 
@@ -339,7 +347,40 @@ def cargar_reservas(proyecto: str = "") -> list:
     return _sb().table('reservas').select('*').eq('proyecto', proyecto).order('id').execute().data
 
 
+def _mismas_personas(a: str, b: str) -> bool:
+    """Dos escrituras del mismo nombre: «ALBANIA RIOS» y «ALBANIA G. RIOS NIETO»."""
+    pal = lambda t: set(re.findall(r'[A-ZÁÉÍÓÚÑ]{3,}', (t or '').upper()))
+    return len(pal(a) & pal(b)) >= 2
+
+
+def quien_ocupa(unidad: str, proyecto: str = "") -> dict:
+    """Quién tiene ese apartamento ahora mismo, si alguien.
+
+    Un apartamento es de una sola persona a la vez. Para dárselo a otra hay que
+    retirar antes a la actual, que es lo que deja constancia de qué pasó con su
+    abono. Sin esto quedan dos clientes en la misma unidad y no se sabe de quién
+    es el dinero —ya pasó en 4-F y en 1-F.
+    """
+    sb = _sb()
+    proyecto = proyecto or _proyecto_db()
+    fila = (sb.table('cuotas').select('nombre').eq('proyecto', proyecto)
+            .eq('unidad', unidad.strip().upper()).limit(1).execute().data) or []
+    if fila:
+        return {'nombre': fila[0].get('nombre') or '', 'donde': 'carta promesa'}
+    fila = (sb.table('reservas').select('nombre').eq('proyecto', proyecto)
+            .eq('unidad', unidad.strip().upper()).limit(1).execute().data) or []
+    if fila:
+        return {'nombre': fila[0].get('nombre') or '', 'donde': 'reserva'}
+    return {}
+
+
 def guardar_reserva(nombre: str, unidad: str, monto: float, fecha, notas: str = '') -> int:
+    ocupa = quien_ocupa(unidad)
+    if ocupa:
+        raise ValueError(
+            f"El apartamento {unidad.strip().upper()} ya es de {ocupa['nombre']} "
+            f"({ocupa['donde']}). Para dárselo a otra persona hay que retirar antes "
+            f"a quien lo tiene, indicando si le aplica devolución.")
     res = _sb().table('reservas').insert({
         'proyecto': _proyecto_db(),
         'nombre':   nombre.strip().upper(),
@@ -504,10 +545,20 @@ def retirar_cliente(unidad: str, motivo: str = '', aplica_devolucion: bool = Fal
     abonado = sum(float(f['monto'] or 0) for f in filas if f.get('fecha_pago'))
     nombre  = next((f['nombre'] for f in filas if f.get('nombre')), '')
 
+    # Si todavía le quedaba la reserva sin pasar al plan, se va con él: dejarla
+    # viva deja el apartamento ocupado por alguien que ya no está.
+    sueltas = (sb.table('reservas').select('id,monto')
+               .eq('proyecto', proyecto).eq('unidad', unidad).execute().data) or []
+    abonado += sum(float(r['monto'] or 0) for r in sueltas)
+
     ficha = _ficha_retiro(proyecto, unidad, nombre, 'cpp', motivo,
                           abonado, aplica_devolucion, usuario)
-    sb.table('cuotas').update({'proyecto': _proyecto_retirado(proyecto, ficha['id'])}) \
+    marcado = _proyecto_retirado(proyecto, ficha['id'])
+    sb.table('cuotas').update({'proyecto': marcado}) \
       .in_('id', [f['id'] for f in filas]).execute()
+    if sueltas:
+        sb.table('reservas').update({'proyecto': marcado}) \
+          .in_('id', [r['id'] for r in sueltas]).execute()
     _soltar_cache()
     return {'ok': True, 'retiro_id': ficha['id'], 'nombre': nombre,
             'abonado': round(abonado, 2), 'cuotas': len(filas)}
@@ -667,19 +718,24 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
         for c in (p.get('cuotas') or [])]
 
     migrada = None
+    try:
+        if filas:
+            creadas = agregar_filas_plan_bulk(unidad, nombre, filas, p['proyecto'])
+        else:
+            creadas = agregar_filas_plan_bulk(
+                unidad, nombre,
+                [{'num_cuota': 1, 'desc': '⚠ Plan de pagos pendiente', 'monto': 0.0}],
+                p['proyecto'])
+    except ValueError as e:
+        return {'ok': False, 'motivo': str(e)}
+
     if filas:
-        creadas = agregar_filas_plan_bulk(unidad, nombre, filas, p['proyecto'])
         # Si ese apartamento tenía reserva, pasa al plan: si no, su abono se
         # contaría dos veces, una en Reservas y otra en los abonos del CPP.
         try:
             migrada = migrar_reserva_a_plan(unidad, p['proyecto'], nombre)
         except Exception:
             migrada = None
-    else:
-        creadas = agregar_filas_plan_bulk(
-            unidad, nombre,
-            [{'num_cuota': 1, 'desc': '⚠ Plan de pagos pendiente', 'monto': 0.0}],
-            p['proyecto'])
 
     # Los documentos pasan del buzón a la carpeta del cliente, con un nombre que
     # clasificar_documento reconozca para que el respaldo nocturno los copie.
