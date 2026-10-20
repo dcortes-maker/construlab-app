@@ -11,28 +11,38 @@ import json
 import re
 import secrets
 
+# Carpeta de Drive donde vive cada proyecto. Cada uno tiene la suya en
+# «Construlab → Proyectos»; el robot solo ve las que le hayan compartido.
+DRIVE_RIVIERA = "1ATTQPzvtDORoOqMLsMnSjDVdIatFVIF3"
+DRIVE_VILLAS = ""   # pendiente: falta compartirle esa carpeta al robot
+
 # Una torre es un proyecto aparte. Los números de apartamento se repiten entre
 # torres —el 3-C existe en las cuatro— y si compartieran proyecto se mezclarían
 # los pagos de clientes distintos. Torre 1 conserva el id que ya tenía para no
 # mover nada de lo que hay cargado.
 PROYECTOS = {
     "riviera_park_2": {
+        "raiz": DRIVE_RIVIERA,
         "db": "riviera-park-2", "grupo": "Riviera Park II", "torre": "Torre 1",
         "drive": "Riviera Par App de abonos", "logo": "logo_b64.txt",
     },
     "riviera_t2": {
+        "raiz": DRIVE_RIVIERA,
         "db": "riviera-park-2-t2", "grupo": "Riviera Park II", "torre": "Torre 2",
         "drive": "Riviera Par App de abonos T2", "logo": "logo_b64.txt",
     },
     "riviera_t3": {
+        "raiz": DRIVE_RIVIERA,
         "db": "riviera-park-2-t3", "grupo": "Riviera Park II", "torre": "Torre 3",
         "drive": "Riviera Par App de abonos T3", "logo": "logo_b64.txt",
     },
     "riviera_t4": {
+        "raiz": DRIVE_RIVIERA,
         "db": "riviera-park-2-t4", "grupo": "Riviera Park II", "torre": "Torre 4",
         "drive": "Riviera Par App de abonos T4", "logo": "logo_b64.txt",
     },
     "villas_del_bosque": {
+        "raiz": DRIVE_VILLAS,
         "db": "villas-del-bosque", "grupo": "Villas del Bosque", "torre": "",
         "drive": "Villas del Bosque App de abonos", "logo": "logo_villas_b64.txt",
     },

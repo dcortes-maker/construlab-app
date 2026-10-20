@@ -227,7 +227,7 @@ class DriveAPIDestino:
         ).execute(num_retries=5)
 
 
-def _destino(carpeta: str = CARPETA_APP):
+def _destino(carpeta: str = CARPETA_APP, raiz: str = DRIVE_FOLDER_ID):
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     ruta = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
     if not raw and ruta:
@@ -241,8 +241,10 @@ def _destino(carpeta: str = CARPETA_APP):
             info, scopes=["https://www.googleapis.com/auth/drive"]
         )
         service = build("drive", "v3", credentials=creds, cache_discovery=False)
-        destino = DriveAPIDestino(service, DRIVE_FOLDER_ID)
-        destino.raiz_id = destino._carpeta(carpeta, DRIVE_FOLDER_ID)
+        if not raiz:
+            return None      # al robot no le han compartido esa carpeta
+        destino = DriveAPIDestino(service, raiz)
+        destino.raiz_id = destino._carpeta(carpeta, raiz)
         return destino
     if DRIVE_LOCAL.parent.exists():
         return LocalDestino(carpeta)
@@ -260,9 +262,10 @@ def main() -> int:
     utils.configurar_cliente(sb)
 
     for pid, info in utils.PROYECTOS.items():
-        destino = _destino(info["drive"])
+        destino = _destino(info["drive"], info["raiz"])
         if destino is None:
-            return 1
+            print(f"\n--- {utils.etiqueta_proyecto(pid)}: sin carpeta de Drive todavia", flush=True)
+            continue
         print(f"\n--- {utils.etiqueta_proyecto(pid)} · {info['drive']}", flush=True)
         _respaldar(sb, destino, info["db"])
     return 0

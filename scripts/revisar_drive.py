@@ -69,12 +69,15 @@ class Drive:
         else:
             print("Drive por la carpeta local de esta Mac.", flush=True)
 
-    def abrir(self, carpeta: str) -> bool:
-        """Apunta a la carpeta de esa torre. False si todavía no existe."""
+    def abrir(self, carpeta: str, raiz: str) -> bool:
+        """Apunta a la carpeta de ese proyecto. False si no se puede abrir:
+        o no existe, o al robot no le han compartido su carpeta raíz."""
         self.carpeta = carpeta
         if not self.service:
             return self._local().exists()
-        self.raiz = self._buscar(carpeta, DRIVE_FOLDER_ID)
+        if not raiz:
+            return False
+        self.raiz = self._buscar(carpeta, raiz)
         return bool(self.raiz)
 
     def _hijos(self, pid):
@@ -166,8 +169,8 @@ def main() -> int:
 
     total_nuevas = 0
     for pid, info in utils.PROYECTOS.items():
-        if not drive.abrir(info['drive']):
-            continue      # esa torre todavía no tiene carpeta en Drive
+        if not drive.abrir(info['drive'], info['raiz']):
+            continue      # sin carpeta en Drive, o sin acceso todavía
         print(f"\n--- {utils.etiqueta_proyecto(pid)} · {info['drive']}", flush=True)
         total_nuevas += _revisar(sb, drive, info['db'])
     return 0
