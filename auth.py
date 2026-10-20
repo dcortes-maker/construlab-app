@@ -523,3 +523,4 @@ def barra_superior():
             <span style='font-size:.65rem;font-weight:800;letter-spacing:.18em;
                          color:#273040;text-transform:uppercase;'>CONSTRULAB</span>
         </div>""", unsafe_allow_html=True)
+
