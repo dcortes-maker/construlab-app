@@ -14,6 +14,11 @@ import secrets
 # Carpeta de Drive donde vive cada proyecto. Cada uno tiene la suya en
 # «Construlab → Proyectos»; el robot solo ve las que le hayan compartido.
 DRIVE_RIVIERA = "1ATTQPzvtDORoOqMLsMnSjDVdIatFVIF3"
+DRIVE_SINCRONIZADO = Path(
+    "/Users/daylincortes/Library/CloudStorage/"
+    "GoogleDrive-dcortes@construlab.com.pa/"
+    "Unidades compartidas/Construlab/Proyectos"
+)
 DRIVE_VILLAS = ""   # pendiente: falta compartirle esa carpeta al robot
 
 # Una torre es un proyecto aparte. Los números de apartamento se repiten entre
@@ -23,26 +28,31 @@ DRIVE_VILLAS = ""   # pendiente: falta compartirle esa carpeta al robot
 PROYECTOS = {
     "riviera_park_2": {
         "raiz": DRIVE_RIVIERA,
+        "proyecto_drive": "1. PROYECTO RIVIERA PARK",
         "db": "riviera-park-2", "grupo": "Riviera Park II", "torre": "Torre 1",
         "drive": "Riviera Par App de abonos", "logo": "logo_b64.txt",
     },
     "riviera_t2": {
         "raiz": DRIVE_RIVIERA,
+        "proyecto_drive": "1. PROYECTO RIVIERA PARK",
         "db": "riviera-park-2-t2", "grupo": "Riviera Park II", "torre": "Torre 2",
         "drive": "Riviera Par App de abonos T2", "logo": "logo_b64.txt",
     },
     "riviera_t3": {
         "raiz": DRIVE_RIVIERA,
+        "proyecto_drive": "1. PROYECTO RIVIERA PARK",
         "db": "riviera-park-2-t3", "grupo": "Riviera Park II", "torre": "Torre 3",
         "drive": "Riviera Par App de abonos T3", "logo": "logo_b64.txt",
     },
     "riviera_t4": {
         "raiz": DRIVE_RIVIERA,
+        "proyecto_drive": "1. PROYECTO RIVIERA PARK",
         "db": "riviera-park-2-t4", "grupo": "Riviera Park II", "torre": "Torre 4",
         "drive": "Riviera Par App de abonos T4", "logo": "logo_b64.txt",
     },
     "villas_del_bosque": {
         "raiz": DRIVE_VILLAS,
+        "proyecto_drive": "2. PROYECTO VILLAS DEL BOSQUE",
         "db": "villas-del-bosque", "grupo": "Villas del Bosque", "torre": "",
         "drive": "Villas del Bosque App de abonos", "logo": "logo_villas_b64.txt",
     },
@@ -54,6 +64,12 @@ _PROYECTOS_DB = {pid: p["db"] for pid, p in PROYECTOS.items()}
 def etiqueta_proyecto(pid: str) -> str:
     p = PROYECTOS.get(pid) or {}
     return " — ".join(x for x in (p.get("grupo"), p.get("torre")) if x) or "Control CPP"
+
+
+def ruta_local(pid: str) -> Path:
+    """Carpeta de ese proyecto en el Drive sincronizado de esta Mac."""
+    p = PROYECTOS.get(pid) or {}
+    return DRIVE_SINCRONIZADO / p.get("proyecto_drive", "") / p.get("drive", "")
 
 
 def carpeta_drive(db: str) -> str:

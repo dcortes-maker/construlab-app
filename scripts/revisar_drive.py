@@ -57,6 +57,7 @@ class Drive:
             raw = Path(ruta).read_text()
         self.service = None
         self.carpeta = CARPETA_APP
+        self.ruta = None
         self.raiz = None
         if raw:
             from google.oauth2 import service_account
@@ -69,10 +70,11 @@ class Drive:
         else:
             print("Drive por la carpeta local de esta Mac.", flush=True)
 
-    def abrir(self, carpeta: str, raiz: str) -> bool:
+    def abrir(self, carpeta: str, raiz: str, ruta=None) -> bool:
         """Apunta a la carpeta de ese proyecto. False si no se puede abrir:
         o no existe, o al robot no le han compartido su carpeta raíz."""
         self.carpeta = carpeta
+        self.ruta = ruta
         if not self.service:
             return self._local().exists()
         if not raiz:
@@ -91,24 +93,56 @@ class Drive:
         return next((h['id'] for h in self._hijos(pid) if h['name'] == nombre), None)
 
     def _local(self) -> Path:
-        return DRIVE_LOCAL / self.carpeta
+        return self.ruta or (DRIVE_LOCAL / self.carpeta)
 
     def apartamentos(self) -> list:
+        """Rutas de las carpetas de cliente, relativas a la del proyecto.
+
+        Villas agrupa sus lotes por fase, Riviera pone los apartamentos sueltos.
+        Una carpeta que solo contiene carpetas es una agrupación y se baja un
+        nivel; una que contiene archivos es la de un cliente.
+        """
         if not self.service:
-            if not self._local().exists():
+            raiz = self._local()
+            if not raiz.exists():
                 return []
-            return sorted(p.name for p in self._local().iterdir()
-                          if p.is_dir() and not p.name.startswith('.'))
+            out = []
+            for p in sorted(raiz.iterdir()):
+                if not p.is_dir() or p.name.startswith('.'):
+                    continue
+                hijos = [x for x in p.iterdir() if not x.name.startswith('.')]
+                if hijos and all(x.is_dir() for x in hijos):
+                    out += [f"{p.name}/{q.name}" for q in sorted(hijos)]
+                else:
+                    out.append(p.name)
+            return out
         if not self.raiz:
             return []
-        return sorted(h['name'] for h in self._hijos(self.raiz)
-                      if h['mimeType'].endswith('folder'))
+        out = []
+        for h in sorted(self._hijos(self.raiz), key=lambda x: x['name']):
+            if not h['mimeType'].endswith('folder'):
+                continue
+            dentro = self._hijos(h['id'])
+            if dentro and all(x['mimeType'].endswith('folder') for x in dentro):
+                out += [f"{h['name']}/{q['name']}"
+                        for q in sorted(dentro, key=lambda x: x['name'])]
+            else:
+                out.append(h['name'])
+        return out
+
+    def _carpeta_de(self, ruta: str):
+        pid = self.raiz
+        for tramo in ruta.split('/'):
+            pid = self._buscar(tramo, pid)
+            if not pid:
+                return None
+        return pid
 
     def archivos(self, apto: str) -> list:
         if not self.service:
             return sorted(p.name for p in (self._local() / apto).iterdir()
                           if p.is_file() and not p.name.startswith('.'))
-        pid = self._buscar(apto, self.raiz)
+        pid = self._carpeta_de(apto)
         return sorted(h['name'] for h in self._hijos(pid)
                       if not h['mimeType'].endswith('folder')) if pid else []
 
@@ -116,8 +150,7 @@ class Drive:
         if not self.service:
             return (self._local() / apto / archivo).read_bytes()
         from googleapiclient.http import MediaIoBaseDownload
-        pid = self._buscar(apto, self.raiz)
-        fid = self._buscar(archivo, pid)
+        fid = self._buscar(archivo, self._carpeta_de(apto))
         buf = io.BytesIO()
         bajada = MediaIoBaseDownload(buf, self.service.files().get_media(
             fileId=fid, supportsAllDrives=True))
@@ -129,10 +162,14 @@ class Drive:
 
 def _normalizar(apto: str) -> str:
     """'8I' -> '8-I', 'PBA' -> 'PB-A'. Las carpetas de Drive no siempre traen
-    el guion con el que la app nombra los apartamentos."""
+    el guion con el que la app nombra los apartamentos de Riviera.
+
+    Un lote de Villas es solo un número —311— y ahí no hay nada que separar:
+    con el guion quedaría '3-11', que es otro lote.
+    """
     u = re.sub(r'[^A-Z0-9]', '', (apto or '').upper())
-    if not u:
-        return ''
+    if not u or u.isdigit():
+        return u
     if u.startswith('PB'):
         return f"PB-{u[2:]}" if len(u) > 2 else u
     return f"{u[0]}-{u[1:]}" if len(u) > 1 else u
@@ -169,7 +206,7 @@ def main() -> int:
 
     total_nuevas = 0
     for pid, info in utils.PROYECTOS.items():
-        if not drive.abrir(info['drive'], info['raiz']):
+        if not drive.abrir(info['drive'], info['raiz'], utils.ruta_local(pid)):
             continue      # sin carpeta en Drive, o sin acceso todavía
         print(f"\n--- {utils.etiqueta_proyecto(pid)} · {info['drive']}", flush=True)
         total_nuevas += _revisar(sb, drive, info['db'])
@@ -189,7 +226,7 @@ def _revisar(sb, drive, proyecto: str) -> int:
     nuevas = repetidas = ilegibles = 0
 
     for carpeta in drive.apartamentos():
-        apto = _normalizar(carpeta)
+        apto = _normalizar(carpeta.rsplit('/', 1)[-1])
         if not apto or apto in con_plan:
             continue          # ya está con su plan: no hay nada que proponer
 
