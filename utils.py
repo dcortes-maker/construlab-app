@@ -11,10 +11,45 @@ import json
 import re
 import secrets
 
-_PROYECTOS_DB = {
-    "riviera_park_2":    "riviera-park-2",
-    "villas_del_bosque": "villas-del-bosque",
+# Una torre es un proyecto aparte. Los números de apartamento se repiten entre
+# torres —el 3-C existe en las cuatro— y si compartieran proyecto se mezclarían
+# los pagos de clientes distintos. Torre 1 conserva el id que ya tenía para no
+# mover nada de lo que hay cargado.
+PROYECTOS = {
+    "riviera_park_2": {
+        "db": "riviera-park-2", "grupo": "Riviera Park II", "torre": "Torre 1",
+        "drive": "Riviera Par App de abonos", "logo": "logo_b64.txt",
+    },
+    "riviera_t2": {
+        "db": "riviera-park-2-t2", "grupo": "Riviera Park II", "torre": "Torre 2",
+        "drive": "Riviera Par App de abonos T2", "logo": "logo_b64.txt",
+    },
+    "riviera_t3": {
+        "db": "riviera-park-2-t3", "grupo": "Riviera Park II", "torre": "Torre 3",
+        "drive": "Riviera Par App de abonos T3", "logo": "logo_b64.txt",
+    },
+    "riviera_t4": {
+        "db": "riviera-park-2-t4", "grupo": "Riviera Park II", "torre": "Torre 4",
+        "drive": "Riviera Par App de abonos T4", "logo": "logo_b64.txt",
+    },
+    "villas_del_bosque": {
+        "db": "villas-del-bosque", "grupo": "Villas del Bosque", "torre": "",
+        "drive": "Villas del Bosque App de abonos", "logo": "logo_villas_b64.txt",
+    },
 }
+
+_PROYECTOS_DB = {pid: p["db"] for pid, p in PROYECTOS.items()}
+
+
+def etiqueta_proyecto(pid: str) -> str:
+    p = PROYECTOS.get(pid) or {}
+    return " — ".join(x for x in (p.get("grupo"), p.get("torre")) if x) or "Control CPP"
+
+
+def carpeta_drive(db: str) -> str:
+    """La carpeta de Drive que le toca a ese proyecto."""
+    return next((p["drive"] for p in PROYECTOS.values() if p["db"] == db),
+                "Riviera Par App de abonos")
 BUCKET = "adjuntos"
 _sb_cliente = None
 
@@ -746,7 +781,8 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
             ext = info['ruta'].rsplit('.', 1)[-1]
             nombre_doc = f"{PREFIJO.get(etiqueta, etiqueta)}_{unidad.replace('/', '-')}.{ext}"
             subir_adjunto(unidad, nombre_doc,
-                          _sb().storage.from_(BUCKET).download(info['ruta']))
+                          _sb().storage.from_(BUCKET).download(info['ruta']),
+                          p['proyecto'])
             _sb().storage.from_(BUCKET).remove([info['ruta']])
             guardado.append(nombre_doc)
         except Exception:
@@ -795,8 +831,18 @@ def saldos_retiros(proyecto: str = "") -> dict:
 
 # ─── Adjuntos (Supabase Storage) ──────────────────────────────────
 
-def _folder(unidad: str) -> str:
-    return unidad.replace('/', '-').replace(' ', '_')
+def _folder(unidad: str, proyecto: str = "") -> str:
+    """Carpeta del apartamento dentro del bucket.
+
+    Las torres repiten los números: el 3-C existe en las cuatro. Sin el proyecto
+    en la ruta, el contrato de un cliente pisaría el de otro. Torre 1 conserva la
+    ruta sin prefijo para no mover los documentos que ya están guardados.
+    """
+    base = unidad.replace('/', '-').replace(' ', '_')
+    proyecto = proyecto or _proyecto_db()
+    if proyecto in ('riviera-park-2', ''):
+        return base
+    return f"{proyecto}/{base}"
 
 
 def _mime(filename: str) -> str:
@@ -813,9 +859,9 @@ def _mime(filename: str) -> str:
     }.get(ext, 'application/octet-stream')
 
 
-def listar_adjuntos(unidad: str) -> list:
+def listar_adjuntos(unidad: str, proyecto: str = "") -> list:
     try:
-        folder = _folder(unidad)
+        folder = _folder(unidad, proyecto)
         files  = _sb().storage.from_(BUCKET).list(folder)
         return [f for f in (files or []) if f.get('name') and not f['name'].startswith('.')]
     except Exception:
@@ -851,9 +897,9 @@ def unidades_con_comprobante(unidades: tuple) -> set:
     return out
 
 
-def subir_adjunto(unidad: str, filename: str, file_bytes: bytes) -> bool:
+def subir_adjunto(unidad: str, filename: str, file_bytes: bytes, proyecto: str = "") -> bool:
     sb     = _sb()
-    folder = _folder(unidad)
+    folder = _folder(unidad, proyecto)
     path   = f"{folder}/{filename}"
     subir_adjunto.ultimo_error = ""
     try:
@@ -875,12 +921,12 @@ def subir_adjunto(unidad: str, filename: str, file_bytes: bytes) -> bool:
         return False
 
 
-def descargar_adjunto(unidad: str, filename: str) -> bytes:
-    return _sb().storage.from_(BUCKET).download(f"{_folder(unidad)}/{filename}")
+def descargar_adjunto(unidad: str, filename: str, proyecto: str = "") -> bytes:
+    return _sb().storage.from_(BUCKET).download(f"{_folder(unidad, proyecto)}/{filename}")
 
 
-def eliminar_adjunto(unidad: str, filename: str):
-    _sb().storage.from_(BUCKET).remove([f"{_folder(unidad)}/{filename}"])
+def eliminar_adjunto(unidad: str, filename: str, proyecto: str = ""):
+    _sb().storage.from_(BUCKET).remove([f"{_folder(unidad, proyecto)}/{filename}"])
 
 
 def clasificar_documento(filename: str) -> str:

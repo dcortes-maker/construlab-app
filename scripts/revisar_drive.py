@@ -44,11 +44,11 @@ DRIVE_LOCAL = Path(
     "GoogleDrive-dcortes@construlab.com.pa/"
     "Unidades compartidas/Construlab/Proyectos/"
     "1. PROYECTO RIVIERA PARK"
-) / CARPETA_APP
+)
 
 
 class Drive:
-    """Lee la carpeta de la app, por la API o por la carpeta sincronizada."""
+    """Lee la carpeta de una torre, por la API o por la carpeta sincronizada."""
 
     def __init__(self):
         raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
@@ -56,6 +56,8 @@ class Drive:
         if not raw and ruta:
             raw = Path(ruta).read_text()
         self.service = None
+        self.carpeta = CARPETA_APP
+        self.raiz = None
         if raw:
             from google.oauth2 import service_account
             from googleapiclient.discovery import build
@@ -64,9 +66,16 @@ class Drive:
                 info, scopes=["https://www.googleapis.com/auth/drive"])
             self.service = build("drive", "v3", credentials=creds, cache_discovery=False)
             print(f"Drive por API. Cuenta {info.get('client_email','')}", flush=True)
-            self.raiz = self._buscar(CARPETA_APP, DRIVE_FOLDER_ID)
         else:
             print("Drive por la carpeta local de esta Mac.", flush=True)
+
+    def abrir(self, carpeta: str) -> bool:
+        """Apunta a la carpeta de esa torre. False si todavía no existe."""
+        self.carpeta = carpeta
+        if not self.service:
+            return self._local().exists()
+        self.raiz = self._buscar(carpeta, DRIVE_FOLDER_ID)
+        return bool(self.raiz)
 
     def _hijos(self, pid):
         return self.service.files().list(
@@ -78,11 +87,14 @@ class Drive:
     def _buscar(self, nombre, pid):
         return next((h['id'] for h in self._hijos(pid) if h['name'] == nombre), None)
 
+    def _local(self) -> Path:
+        return DRIVE_LOCAL / self.carpeta
+
     def apartamentos(self) -> list:
         if not self.service:
-            if not DRIVE_LOCAL.exists():
+            if not self._local().exists():
                 return []
-            return sorted(p.name for p in DRIVE_LOCAL.iterdir()
+            return sorted(p.name for p in self._local().iterdir()
                           if p.is_dir() and not p.name.startswith('.'))
         if not self.raiz:
             return []
@@ -91,8 +103,7 @@ class Drive:
 
     def archivos(self, apto: str) -> list:
         if not self.service:
-            carpeta = DRIVE_LOCAL / apto
-            return sorted(p.name for p in carpeta.iterdir()
+            return sorted(p.name for p in (self._local() / apto).iterdir()
                           if p.is_file() and not p.name.startswith('.'))
         pid = self._buscar(apto, self.raiz)
         return sorted(h['name'] for h in self._hijos(pid)
@@ -100,7 +111,7 @@ class Drive:
 
     def bajar(self, apto: str, archivo: str) -> bytes:
         if not self.service:
-            return (DRIVE_LOCAL / apto / archivo).read_bytes()
+            return (self._local() / apto / archivo).read_bytes()
         from googleapiclient.http import MediaIoBaseDownload
         pid = self._buscar(apto, self.raiz)
         fid = self._buscar(archivo, pid)
@@ -153,7 +164,16 @@ def main() -> int:
     utils.configurar_cliente(sb)
     drive = Drive()
 
-    proyecto = "riviera-park-2"
+    total_nuevas = 0
+    for pid, info in utils.PROYECTOS.items():
+        if not drive.abrir(info['drive']):
+            continue      # esa torre todavía no tiene carpeta en Drive
+        print(f"\n--- {utils.etiqueta_proyecto(pid)} · {info['drive']}", flush=True)
+        total_nuevas += _revisar(sb, drive, info['db'])
+    return 0
+
+
+def _revisar(sb, drive, proyecto: str) -> int:
     d = utils.cargar_datos(proyecto)
     sin_plan = set(d['sin_plan'])
     # Quien fue retirado a propósito no "falta": sus papeles siguen en Drive y
@@ -240,10 +260,9 @@ def main() -> int:
               f" — «{elegido}»{con}", flush=True)
 
     _guardar_indice(ya)
-    print(f"Revision lista. {nuevas} propuestas nuevas, {repetidas} ya estaban en el buzon, "
-          f"{ilegibles} anexos escaneados sin texto que leer (falta el archivo original).",
-          flush=True)
-    return 0
+    print(f"  {nuevas} propuestas nuevas, {repetidas} ya estaban en el buzon, "
+          f"{ilegibles} anexos escaneados sin texto que leer.", flush=True)
+    return nuevas
 
 
 if __name__ == "__main__":

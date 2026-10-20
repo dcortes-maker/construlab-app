@@ -36,12 +36,13 @@ from utils import BUCKET, clasificar_documento, obtener_pdf_recibo
 # Id de "1. PROYECTO RIVIERA PARK" (Construlab → Proyectos). Ahí se crea la carpeta de la app.
 CARPETA_APP = "Riviera Par App de abonos"
 DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID", "1ATTQPzvtDORoOqMLsMnSjDVdIatFVIF3")
-DRIVE_LOCAL = Path(
+DRIVE_RAIZ = Path(
     "/Users/daylincortes/Library/CloudStorage/"
     "GoogleDrive-dcortes@construlab.com.pa/"
     "Unidades compartidas/Construlab/Proyectos/"
-    "1. PROYECTO RIVIERA PARK/Riviera Par App de abonos"
+    "1. PROYECTO RIVIERA PARK"
 )
+DRIVE_LOCAL = DRIVE_RAIZ / CARPETA_APP
 SALTAR = {"sistema", "recibos"}
 LEEME = """# Riviera Par App de abonos
 
@@ -81,6 +82,12 @@ def _listar_storage(sb, folder: str) -> list:
     return sb.storage.from_(BUCKET).list(folder, {"limit": 1000}) or []
 
 
+def _apto(unidad: str) -> str:
+    """Carpeta del apartamento dentro de Drive. Sin la torre: a la torre la
+    separa ya su propia carpeta, a diferencia del bucket de Supabase."""
+    return unidad.replace('/', '-').replace(' ', '_')
+
+
 def _q(texto: str) -> str:
     return texto.replace("\\", "\\\\").replace("'", "\\'")
 
@@ -88,11 +95,11 @@ def _q(texto: str) -> str:
 class LocalDestino:
     """Escribe en la carpeta sincronizada de esta Mac."""
 
-    def __init__(self):
-        self.raiz = DRIVE_LOCAL
+    def __init__(self, carpeta: str = CARPETA_APP):
+        self.raiz = DRIVE_RAIZ / carpeta
 
     def poner(self, tipo: str, unidad: str, fname: str, data: bytes) -> str:
-        dest = self.raiz / utils._folder(unidad) / fname
+        dest = self.raiz / _apto(unidad) / fname
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists() and dest.stat().st_size == len(data):
             return "igual"
@@ -102,7 +109,7 @@ class LocalDestino:
         return "copiado"
 
     def anular_recibo(self, unidad: str, num: int) -> bool:
-        carpeta = self.raiz / utils._folder(unidad)
+        carpeta = self.raiz / _apto(unidad)
         base = f"Recibo_{num}_{unidad.replace('/', '-')}"
         vivo = carpeta / f"{base}.pdf"
         muerto = carpeta / f"{base}_ANULADO.pdf"
@@ -162,7 +169,7 @@ class DriveAPIDestino:
         return creado["id"]
 
     def _dir(self, unidad: str) -> str:
-        return self._carpeta(utils._folder(unidad), self.raiz_id)
+        return self._carpeta(_apto(unidad), self.raiz_id)
 
     def poner(self, tipo: str, unidad: str, fname: str, data: bytes) -> str:
         from googleapiclient.http import MediaIoBaseUpload
@@ -220,7 +227,7 @@ class DriveAPIDestino:
         ).execute(num_retries=5)
 
 
-def _destino():
+def _destino(carpeta: str = CARPETA_APP):
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     ruta = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
     if not raw and ruta:
@@ -234,17 +241,11 @@ def _destino():
             info, scopes=["https://www.googleapis.com/auth/drive"]
         )
         service = build("drive", "v3", credentials=creds, cache_discovery=False)
-        print(
-            f"Drive por API. Dentro de {DRIVE_FOLDER_ID} se usa '{CARPETA_APP}'. "
-            f"Cuenta {info.get('client_email', '')}",
-            flush=True,
-        )
         destino = DriveAPIDestino(service, DRIVE_FOLDER_ID)
-        destino.raiz_id = destino._carpeta(CARPETA_APP, DRIVE_FOLDER_ID)
+        destino.raiz_id = destino._carpeta(carpeta, DRIVE_FOLDER_ID)
         return destino
     if DRIVE_LOCAL.parent.exists():
-        print("Drive por la carpeta local de esta Mac.", flush=True)
-        return LocalDestino()
+        return LocalDestino(carpeta)
     print(
         "Falta GOOGLE_SERVICE_ACCOUNT_JSON. En Railway esa variable es obligatoria: "
         "el servidor no ve la carpeta de Drive de la Mac.",
@@ -254,23 +255,36 @@ def _destino():
 
 
 def main() -> int:
-    destino = _destino()
-    if destino is None:
-        return 1
-
     url, key = _credenciales_supabase()
     sb = create_client(url, key)
     utils.configurar_cliente(sb)
+
+    for pid, info in utils.PROYECTOS.items():
+        destino = _destino(info["drive"])
+        if destino is None:
+            return 1
+        print(f"\n--- {utils.etiqueta_proyecto(pid)} · {info['drive']}", flush=True)
+        _respaldar(sb, destino, info["db"])
+    return 0
+
+
+def _respaldar(sb, destino, proyecto: str) -> None:
+    # En el bucket, Torre 1 no lleva prefijo; las demás sí, porque los números
+    # de apartamento se repiten entre torres.
+    prefijo = "" if proyecto == "riviera-park-2" else proyecto
 
     copiados = {"contrato": 0, "anexo": 0, "recibo": 0, "comprobante": 0}
     iguales = {"contrato": 0, "anexo": 0, "recibo": 0, "comprobante": 0}
     omitidos = 0
 
-    for item in _listar_storage(sb, ""):
+    for item in _listar_storage(sb, prefijo):
         nombre = item.get("name") or ""
         if not nombre or nombre in SALTAR or item.get("metadata") is not None:
             continue
-        for archivo in _listar_storage(sb, nombre):
+        if not prefijo and nombre in {p["db"] for p in utils.PROYECTOS.values()}:
+            continue      # la carpeta de otra torre, no un apartamento de esta
+        ruta = f"{prefijo}/{nombre}" if prefijo else nombre
+        for archivo in _listar_storage(sb, ruta):
             fname = archivo.get("name") or ""
             if not fname or fname.startswith(".") or archivo.get("metadata") is None:
                 continue
@@ -278,14 +292,15 @@ def main() -> int:
             if not tipo:
                 omitidos += 1
                 continue
-            data = sb.storage.from_(BUCKET).download(f"{nombre}/{fname}")
+            data = sb.storage.from_(BUCKET).download(f"{ruta}/{fname}")
             resultado = destino.poner(tipo, nombre, fname, data)
             if resultado == "copiado":
                 copiados[tipo] += 1
             else:
                 iguales[tipo] += 1
 
-    emitidos = sb.table("recibos").select("*").eq("estado", "emitido").limit(2000).execute().data or []
+    emitidos = (sb.table("recibos").select("*").eq("estado", "emitido")
+                .eq("proyecto", proyecto).limit(2000).execute().data) or []
     for r in emitidos:
         unidad = r.get("unidad") or "sin-unidad"
         num = r["num"]
@@ -305,7 +320,8 @@ def main() -> int:
         else:
             iguales["recibo"] += 1
 
-    anulados = sb.table("recibos").select("num,unidad").eq("estado", "anulado").limit(2000).execute().data or []
+    anulados = (sb.table("recibos").select("num,unidad").eq("estado", "anulado")
+            .eq("proyecto", proyecto).limit(2000).execute().data) or []
     renombrados = 0
     for r in anulados:
         if destino.anular_recibo(r.get("unidad") or "sin-unidad", r["num"]):
@@ -313,7 +329,7 @@ def main() -> int:
 
     destino.asegurar_leeme()
     print(
-        "Respaldo listo.",
+        "  listo.",
         f"contratos nuevos {copiados['contrato']} (ya estaban {iguales['contrato']}),",
         f"anexos nuevos {copiados['anexo']} (ya estaban {iguales['anexo']}),",
         f"recibos nuevos {copiados['recibo']} (ya estaban {iguales['recibo']}),",
@@ -322,7 +338,6 @@ def main() -> int:
         f"otros adjuntos sin copiar {omitidos}.",
         flush=True,
     )
-    return 0
 
 
 if __name__ == "__main__":

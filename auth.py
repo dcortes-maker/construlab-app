@@ -5,14 +5,10 @@ import base64
 from pathlib import Path
 import extra_streamlit_components as stx
 
-_LOGOS = {
-    "riviera_park_2":    "logo_b64.txt",
-    "villas_del_bosque": "logo_villas_b64.txt",
-}
-
 def _logo_b64():
+    from utils import PROYECTOS as _P
     pid  = st.session_state.get("proyecto", "riviera_park_2")
-    fname = _LOGOS.get(pid, "logo_b64.txt")
+    fname = (_P.get(pid) or {}).get("logo", "logo_b64.txt")
     p = Path(__file__).parent / fname
     if p.exists():
         return p.read_text().strip()
@@ -177,11 +173,20 @@ def login():
                         _guardar_usuarios(existentes)
                         st.success(f"Cuenta creada. Ya puedes iniciar sesión, {nuevo_nombre}.")
 
+from utils import PROYECTOS as _PROY, etiqueta_proyecto
+
 # Proyectos disponibles: {id: nombre_display}
-PROYECTOS = {
-    "riviera_park_2":    "🏢 Riviera Park II — Fase 2",
-    "villas_del_bosque": "🌳 Villas del Bosque",
-}
+PROYECTOS = {pid: etiqueta_proyecto(pid) for pid in _PROY}
+
+ICONO = {"Riviera Park II": "🏢", "Villas del Bosque": "🌳"}
+
+
+def _grupos() -> dict:
+    """{grupo: [ids de sus torres]}, en el orden en que están definidos."""
+    out = {}
+    for pid, p in _PROY.items():
+        out.setdefault(p["grupo"], []).append(pid)
+    return out
 
 
 def seleccionar_proyecto():
@@ -206,13 +211,39 @@ def seleccionar_proyecto():
     </div>
     """, unsafe_allow_html=True)
 
+    grupos = _grupos()
+    elegido = st.session_state.get('_grupo')
+
     col = st.columns([1, 1.2, 1])[1]
     with col:
-        for pid, pnombre in PROYECTOS.items():
-            if st.button(pnombre, use_container_width=True, key=f"proj_{pid}",
-                         type="primary" if pid == "riviera_park_2" else "secondary"):
-                st.session_state.proyecto = pid
+        # Primer paso: el proyecto. Segundo: la torre, si tiene más de una.
+        if not elegido:
+            for grupo, ids in grupos.items():
+                etiqueta = f"{ICONO.get(grupo, '🏗')} {grupo}"
+                if len(ids) > 1:
+                    etiqueta += f"  ·  {len(ids)} torres"
+                if st.button(etiqueta, use_container_width=True, key=f"grp_{grupo}",
+                             type="primary" if grupo == "Riviera Park II" else "secondary"):
+                    if len(ids) == 1:
+                        st.session_state.proyecto = ids[0]
+                    else:
+                        st.session_state._grupo = grupo
+                    st.rerun()
+        else:
+            st.markdown(f"<div style='text-align:center;color:#94a3b8;margin-bottom:10px;'>"
+                        f"{ICONO.get(elegido,'🏗')} <strong style='color:#f1f5f9;'>{elegido}</strong>"
+                        f"<br><span style='font-size:.85rem;'>¿A qué torre entras?</span></div>",
+                        unsafe_allow_html=True)
+            for pid in grupos[elegido]:
+                if st.button(_PROY[pid]['torre'], use_container_width=True,
+                             key=f"torre_{pid}", type="primary"):
+                    st.session_state.proyecto = pid
+                    st.session_state.pop('_grupo', None)
+                    st.rerun()
+            if st.button("← Volver", use_container_width=True, key="volver_grupo"):
+                st.session_state.pop('_grupo', None)
                 st.rerun()
+
         st.markdown("---")
         if st.button("🚪 Cerrar sesión", use_container_width=True):
             cerrar_sesion()
@@ -262,6 +293,7 @@ def cerrar_sesion():
     _borrar_cookie()
     st.session_state.autenticado = False
     st.session_state.pop('proyecto', None)
+    st.session_state.pop('_grupo', None)
     st.rerun()
 
 def barra_superior():
@@ -482,6 +514,7 @@ def barra_superior():
                     unsafe_allow_html=True)
         if st.button("🔄 Cambiar proyecto", key="_cambiar_proy", use_container_width=True):
             st.session_state.pop('proyecto', None)
+            st.session_state.pop('_grupo', None)
             st.rerun()
         if st.button("Cerrar sesión", key="_cerrar_sb", use_container_width=True):
             cerrar_sesion()

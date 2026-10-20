@@ -10,7 +10,8 @@ from utils import (
     subir_adjunto,
 )
 
-PROYECTOS = {"riviera-park-2", "villas-del-bosque"}
+from utils import PROYECTOS as _P
+PROYECTOS = {p["db"] for p in _P.values()}
 MAX_BYTES = 20 * 1024 * 1024
 
 
@@ -40,7 +41,7 @@ def _fila(f: dict) -> dict:
 
 def cargar_anexo(data: bytes, filename: str, unidad: str, nombre: str, proyecto: str) -> dict:
     if proyecto not in PROYECTOS:
-        raise ValueError("Proyecto desconocido. Usa riviera-park-2 o villas-del-bosque.")
+        raise ValueError("Proyecto desconocido. Usa uno de: " + ", ".join(sorted(PROYECTOS)) + ".")
     exigir_pdf(filename, data)
     leido = extraer_datos_cliente(data, filename)
     unidad = (unidad or leido.get("unidad") or "").strip().upper()
@@ -56,7 +57,7 @@ def cargar_anexo(data: bytes, filename: str, unidad: str, nombre: str, proyecto:
 
     insertadas = agregar_filas_plan_bulk(unidad, nombre, filas, proyecto=proyecto)
     fname = "Plan_de_Pagos_" + _nombre_archivo(filename)
-    if not subir_adjunto(unidad, fname, data):
+    if not subir_adjunto(unidad, fname, data, proyecto):
         detalle = getattr(subir_adjunto, "ultimo_error", "") or "no se pudo guardar el archivo"
         raise RuntimeError(f"Las cuotas se registraron, pero el PDF no quedó guardado: {detalle}")
     # Con el nombre, para no llevarle a este cliente la reserva de otro si el
@@ -78,13 +79,13 @@ def cargar_anexo(data: bytes, filename: str, unidad: str, nombre: str, proyecto:
 
 def cargar_contrato(data: bytes, filename: str, unidad: str, proyecto: str) -> dict:
     if proyecto not in PROYECTOS:
-        raise ValueError("Proyecto desconocido. Usa riviera-park-2 o villas-del-bosque.")
+        raise ValueError("Proyecto desconocido. Usa uno de: " + ", ".join(sorted(PROYECTOS)) + ".")
     exigir_pdf(filename, data)
     unidad = (unidad or "").strip().upper()
     if not unidad:
         raise ValueError("La unidad es obligatoria para un contrato.")
     fname = f"Contrato_{unidad.replace('/', '-').replace(' ', '_')}.pdf"
-    if not subir_adjunto(unidad, fname, data):
+    if not subir_adjunto(unidad, fname, data, proyecto):
         detalle = getattr(subir_adjunto, "ultimo_error", "") or "no se pudo guardar el archivo"
         raise RuntimeError(detalle)
     conocidas = {u["unidad"] for u in listar_unidades(proyecto)}
