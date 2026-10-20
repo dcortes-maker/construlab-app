@@ -624,7 +624,8 @@ def _cerrar_propuesta(pid: str, estado: str, quien: str = ''):
     return p
 
 
-def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str = '') -> dict:
+def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str = '',
+                      cuotas: list = None) -> dict:
     """Mete al cliente en la app: su documento y, si se pudo leer, su plan.
 
     Sin cuotas el cliente igual entra, marcado «Plan de pagos pendiente» —así
@@ -637,11 +638,21 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
     unidad = (unidad or p['unidad']).strip().upper()
     nombre = (nombre or p['nombre']).strip().upper()
 
-    if p.get('cuotas'):
-        filas = [{'num_cuota': c['num_cuota'], 'desc': c['desc'],
-                  'fecha_venc': c.get('fecha_venc') or None, 'monto': c['monto']}
-                 for c in p['cuotas']]
+    # cuotas viene de la pantalla cuando alguien corrigió lo que se leyó mal.
+    filas = cuotas if cuotas is not None else [
+        {'num_cuota': c['num_cuota'], 'desc': c['desc'],
+         'fecha_venc': c.get('fecha_venc') or None, 'monto': c['monto']}
+        for c in (p.get('cuotas') or [])]
+
+    migrada = None
+    if filas:
         creadas = agregar_filas_plan_bulk(unidad, nombre, filas, p['proyecto'])
+        # Si ese apartamento tenía reserva, pasa al plan: si no, su abono se
+        # contaría dos veces, una en Reservas y otra en los abonos del CPP.
+        try:
+            migrada = migrar_reserva_a_plan(unidad, p['proyecto'])
+        except Exception:
+            migrada = None
     else:
         creadas = agregar_filas_plan_bulk(
             unidad, nombre,
@@ -663,8 +674,8 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
             guardado = ''   # el cliente ya entró; el documento se puede subir a mano
 
     _cerrar_propuesta(pid, 'aprobada', quien)
-    return {'ok': True, 'unidad': unidad, 'nombre': nombre,
-            'creadas': creadas, 'con_plan': bool(p.get('cuotas')), 'documento': guardado}
+    return {'ok': True, 'unidad': unidad, 'nombre': nombre, 'creadas': creadas,
+            'con_plan': bool(filas), 'documento': guardado, 'reserva': migrada}
 
 
 def descartar_propuesta(pid: str, quien: str = '') -> bool:

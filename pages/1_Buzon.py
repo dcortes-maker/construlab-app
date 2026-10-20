@@ -6,6 +6,15 @@ from utils import (_proyecto_db, listar_buzon, aprobar_propuesta,
 import pandas as pd
 
 st.set_page_config(page_title="Buzón", page_icon="📥", layout="wide")
+
+# Las mismas opciones que al cargar un plan a mano, para que no se escriban
+# descripciones distintas según por dónde entró el cliente.
+DESCS = ["Reserva", "Separación",
+         "I Pago", "II Pago", "III Pago", "IV Pago", "V Pago",
+         "VI Pago", "VII Pago", "VIII Pago", "IX Pago", "X Pago",
+         "XI Pago", "XII Pago", "XIII Pago", "XIV Pago", "XV Pago",
+         "XVI Pago", "XVII Pago", "XVIII Pago", "XIX Pago", "XX Pago",
+         "Abono inicial", "Gasto Legal", "Gasto Manejo", "Bonificación", "Otro"]
 verificar_login()
 barra_superior()
 
@@ -43,33 +52,73 @@ if con_plan:
             st.caption(f"Leído de «{p['archivo']}» · {p['origen']}")
 
             df = pd.DataFrame([{
-                'Cuota': c['num_cuota'],
+                '#': c['num_cuota'],
                 'Descripción': c['desc'],
-                'Vence': c['fecha_venc'],
-                'Monto': float(c['monto'] or 0),
+                'Fecha Venc.': pd.to_datetime(c['fecha_venc'], errors='coerce'),
+                'Monto ($)': float(c['monto'] or 0),
             } for c in p['cuotas']])
-            st.dataframe(df.style.format({'Monto': '${:,.2f}'}),
-                         use_container_width=True, hide_index=True)
-            st.markdown(f"**Total del plan: ${p['total']:,.2f}**")
 
-            if ES_ADMIN:
-                st.caption("Corrige el apartamento o el nombre si la app los leyó mal.")
-                a, b = st.columns(2)
-                u = a.text_input("Apartamento", value=p['unidad'], key=f"u_{p['id']}")
-                n = b.text_input("Cliente", value=p['nombre'], key=f"n_{p['id']}")
+            if not ES_ADMIN:
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.markdown(f"**Total del plan: ${p['total']:,.2f}**")
+                continue
 
-                x, y = st.columns(2)
-                if x.button("✅ Aprobar y crear el plan", type="primary", key=f"ok_{p['id']}"):
-                    res = aprobar_propuesta(p['id'], u, n, st.session_state.get('nombre', ''))
+            st.caption("Revisa que esté todo bien. Puedes corregir cualquier celda, "
+                       "agregar filas o borrarlas antes de aceptar.")
+            a, b = st.columns(2)
+            u = a.text_input("Apartamento", value=p['unidad'], key=f"u_{p['id']}")
+            n = b.text_input("Cliente", value=p['nombre'], key=f"n_{p['id']}")
+
+            editado = st.data_editor(
+                df, use_container_width=True, hide_index=True, num_rows="dynamic",
+                column_config={
+                    '#': st.column_config.NumberColumn('#', min_value=1, step=1, width="small"),
+                    'Descripción': st.column_config.SelectboxColumn('Descripción', options=DESCS,
+                                                                    width="medium"),
+                    'Fecha Venc.': st.column_config.DateColumn('Fecha Venc.', format="DD/MM/YYYY"),
+                    'Monto ($)': st.column_config.NumberColumn('Monto ($)', min_value=0.01,
+                                                               format="$%.2f"),
+                },
+                key=f"ed_{p['id']}",
+            )
+
+            filas = []
+            for _, row in editado.iterrows():
+                if pd.isna(row['Monto ($)']) or float(row['Monto ($)']) <= 0:
+                    continue
+                fv = row['Fecha Venc.']
+                filas.append({
+                    'num_cuota': int(row['#']) if pd.notna(row['#']) else 1,
+                    'desc': row['Descripción'] or 'Abono inicial',
+                    'fecha_venc': fv.date().isoformat() if pd.notna(fv) else None,
+                    'monto': float(row['Monto ($)']),
+                })
+
+            total_ed = sum(f['monto'] for f in filas)
+            st.markdown(f"**{len(filas)} cuotas · Total: ${total_ed:,.2f}**"
+                        + (f"  ·  leído originalmente: ${p['total']:,.2f}"
+                           if abs(total_ed - p['total']) > 0.01 else ""))
+
+            x, y = st.columns(2)
+            if x.button("✅ Aceptar y crear el plan", type="primary", key=f"ok_{p['id']}"):
+                if not filas:
+                    st.error("El plan quedó sin cuotas con monto.")
+                else:
+                    res = aprobar_propuesta(p['id'], u, n,
+                                            st.session_state.get('nombre', ''), filas)
                     if res['ok']:
-                        st.success(f"Plan de {res['nombre']} creado en {res['unidad']} "
-                                   f"({res['creadas']} cuotas).")
+                        msg = (f"Plan de {res['nombre']} creado en {res['unidad']} "
+                               f"({res['creadas']} cuotas).")
+                        if res.get('reserva'):
+                            msg += (f" Su reserva de ${res['reserva']['monto']:,.2f} "
+                                    f"pasó al plan.")
+                        st.success(msg)
                         st.rerun()
                     else:
                         st.error(res['motivo'])
-                if y.button("Descartar", key=f"no_{p['id']}"):
-                    descartar_propuesta(p['id'], st.session_state.get('nombre', ''))
-                    st.rerun()
+            if y.button("Descartar", key=f"no_{p['id']}"):
+                descartar_propuesta(p['id'], st.session_state.get('nombre', ''))
+                st.rerun()
 
 # ─── Los que no se pueden leer ──────────────────────────────────────
 if sin_plan:
