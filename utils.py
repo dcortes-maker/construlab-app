@@ -681,19 +681,20 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
             [{'num_cuota': 1, 'desc': '⚠ Plan de pagos pendiente', 'monto': 0.0}],
             p['proyecto'])
 
-    # El documento pasa del buzón a la carpeta del cliente, con un nombre que
-    # clasificar_documento reconozca para que el respaldo nocturno lo copie.
-    guardado = ''
-    if p.get('adjunto'):
+    # Los documentos pasan del buzón a la carpeta del cliente, con un nombre que
+    # clasificar_documento reconozca para que el respaldo nocturno los copie.
+    PREFIJO = {'anexo': 'Plan_de_Pagos_anexo', 'contrato': 'Contrato'}
+    guardado = []
+    for etiqueta, info in (p.get('adjuntos') or {}).items():
         try:
-            ext = p['adjunto'].rsplit('.', 1)[-1]
-            prefijo = 'Contrato' if p.get('tipo') == 'contrato' else 'Plan_de_Pagos_anexo'
-            guardado = f"{prefijo}_{unidad.replace('/', '-')}.{ext}"
-            datos = _sb().storage.from_(BUCKET).download(p['adjunto'])
-            subir_adjunto(unidad, guardado, datos)
-            _sb().storage.from_(BUCKET).remove([p['adjunto']])
+            ext = info['ruta'].rsplit('.', 1)[-1]
+            nombre_doc = f"{PREFIJO.get(etiqueta, etiqueta)}_{unidad.replace('/', '-')}.{ext}"
+            subir_adjunto(unidad, nombre_doc,
+                          _sb().storage.from_(BUCKET).download(info['ruta']))
+            _sb().storage.from_(BUCKET).remove([info['ruta']])
+            guardado.append(nombre_doc)
         except Exception:
-            guardado = ''   # el cliente ya entró; el documento se puede subir a mano
+            pass    # el cliente ya entró; ese documento se puede subir a mano
 
     _cerrar_propuesta(pid, 'aprobada', quien)
     return {'ok': True, 'unidad': unidad, 'nombre': nombre, 'creadas': creadas,
@@ -702,9 +703,10 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
 
 def descartar_propuesta(pid: str, quien: str = '') -> bool:
     p = _leer_doc(f"{_DIR_BUZON}/{pid}.json")
-    if p and p.get('adjunto'):
+    rutas = [i['ruta'] for i in ((p or {}).get('adjuntos') or {}).values()]
+    if rutas:
         try:
-            _sb().storage.from_(BUCKET).remove([p['adjunto']])
+            _sb().storage.from_(BUCKET).remove(rutas)
         except Exception:
             pass
     return bool(_cerrar_propuesta(pid, 'descartada', quien))

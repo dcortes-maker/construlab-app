@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Busca en Drive clientes que todavía no están en la app.
+"""Revisa la carpeta de Drive de la app y propone lo que falte en la app.
 
-Mira las carpetas que el equipo llena a mano —los contratos en `CPP/` y los
-anexos en `ABONOS DE CLIENTES/Plan de pagos/`— y compara con lo que hay en la
-app. De lo que falte deja una propuesta en el buzón.
+REGLA: la única carpeta que se lee es «Riviera Par App de abonos». Ahí dentro hay
+una carpeta por apartamento, y el equipo deja en ella el contrato y el anexo de
+pago. No se mira ninguna otra carpeta del proyecto.
 
-No crea nada. Una propuesta es solo eso: alguien la aprueba desde la pantalla
-Buzón y ahí sí se crea el plan. Esto es a propósito: la app lleva el dinero del
-proyecto y un lector equivocado de madrugada no lo nota nadie.
+De lo que encuentre para un apartamento que no está en la app —o que está pero
+sin plan de pagos— deja una propuesta en el buzón. No crea nada: alguien la
+aprueba desde la pantalla Buzón y ahí sí entra. Esto es a propósito, porque la
+app lleva el dinero del proyecto y un lector equivocado de madrugada no lo nota
+nadie.
 
-La mitad de los anexos de Drive son fotos escaneadas y no tienen texto que leer.
-Esos también se proponen, pero marcados para cargar a mano: lo valioso es que
-nadie se entere tarde de que un cliente nunca entró a la app.
+Muchos de esos PDF son fotos escaneadas y no tienen texto que leer. Se proponen
+igual, marcados para cargar a mano: lo valioso es que nadie se entere tarde de
+que un cliente nunca entró a la app.
 
     python3 scripts/revisar_drive.py
 
@@ -32,42 +34,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from supabase import create_client
 
 import utils
-from respaldo_documentos_drive import DRIVE_FOLDER_ID, _credenciales_supabase, _q
+from respaldo_documentos_drive import (CARPETA_APP, DRIVE_FOLDER_ID,
+                                       _credenciales_supabase, _q)
 
 DIR_BUZON = "sistema/buzon"
-CARPETAS = [
-    ("CPP", "contrato"),
-    ("ABONOS DE CLIENTES/Plan de pagos", "plan"),
-]
+RUTA_INDICE = f"{DIR_BUZON}/_indice.json"
 DRIVE_LOCAL = Path(
     "/Users/daylincortes/Library/CloudStorage/"
     "GoogleDrive-dcortes@construlab.com.pa/"
     "Unidades compartidas/Construlab/Proyectos/"
     "1. PROYECTO RIVIERA PARK"
-)
-
-
-def _normalizar(unidad: str) -> str:
-    """'3E' -> '3-E', 'PBA' -> 'PB-A'. Así se llaman en la app."""
-    u = re.sub(r'[^A-Z0-9]', '', (unidad or '').upper())
-    if not u:
-        return ''
-    if u.startswith('PB'):
-        return f"PB-{u[2:]}" if len(u) > 2 else u
-    return f"{u[0]}-{u[1:]}" if len(u) > 1 else u
-
-
-def _del_nombre(archivo: str) -> tuple:
-    """Saca unidad y cliente de '1A - Esteban Newsan.pdf' o 'Plan de pago 2G - Karol Saenz.pdf'."""
-    n = re.sub(r'(?i)^plan de pagos?\s*', '', Path(archivo).stem).strip()
-    m = re.match(r'([A-Za-z0-9]{1,4})\s*[-–]?\s+(.*)', n)
-    if not m:
-        return '', ''
-    return _normalizar(m.group(1)), m.group(2).strip().upper()
+) / CARPETA_APP
 
 
 class Drive:
-    """Lee de Drive por la API, o de la carpeta sincronizada si no hay llave."""
+    """Lee la carpeta de la app, por la API o por la carpeta sincronizada."""
 
     def __init__(self):
         raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
@@ -83,6 +64,7 @@ class Drive:
                 info, scopes=["https://www.googleapis.com/auth/drive"])
             self.service = build("drive", "v3", credentials=creds, cache_discovery=False)
             print(f"Drive por API. Cuenta {info.get('client_email','')}", flush=True)
+            self.raiz = self._buscar(CARPETA_APP, DRIVE_FOLDER_ID)
         else:
             print("Drive por la carpeta local de esta Mac.", flush=True)
 
@@ -91,36 +73,37 @@ class Drive:
             q=f"'{pid}' in parents and trashed = false",
             fields="files(id, name, mimeType)", supportsAllDrives=True,
             includeItemsFromAllDrives=True, pageSize=1000,
-        ).execute().get("files", [])
+        ).execute(num_retries=5).get("files", [])
 
-    def _id_de(self, ruta: str):
-        pid = DRIVE_FOLDER_ID
-        for tramo in ruta.split('/'):
-            encontrado = next((h for h in self._hijos(pid) if h['name'] == tramo), None)
-            if not encontrado:
-                return None
-            pid = encontrado['id']
-        return pid
+    def _buscar(self, nombre, pid):
+        return next((h['id'] for h in self._hijos(pid) if h['name'] == nombre), None)
 
-    def listar(self, ruta: str) -> list:
+    def apartamentos(self) -> list:
         if not self.service:
-            carpeta = DRIVE_LOCAL / ruta
-            if not carpeta.exists():
+            if not DRIVE_LOCAL.exists():
                 return []
-            return [p.name for p in sorted(carpeta.iterdir())
-                    if p.is_file() and not p.name.startswith('.')]
-        pid = self._id_de(ruta)
-        if not pid:
+            return sorted(p.name for p in DRIVE_LOCAL.iterdir()
+                          if p.is_dir() and not p.name.startswith('.'))
+        if not self.raiz:
             return []
-        return sorted(h['name'] for h in self._hijos(pid)
-                      if not h['mimeType'].endswith('folder'))
+        return sorted(h['name'] for h in self._hijos(self.raiz)
+                      if h['mimeType'].endswith('folder'))
 
-    def bajar(self, ruta: str, archivo: str) -> bytes:
+    def archivos(self, apto: str) -> list:
         if not self.service:
-            return (DRIVE_LOCAL / ruta / archivo).read_bytes()
+            carpeta = DRIVE_LOCAL / apto
+            return sorted(p.name for p in carpeta.iterdir()
+                          if p.is_file() and not p.name.startswith('.'))
+        pid = self._buscar(apto, self.raiz)
+        return sorted(h['name'] for h in self._hijos(pid)
+                      if not h['mimeType'].endswith('folder')) if pid else []
+
+    def bajar(self, apto: str, archivo: str) -> bytes:
+        if not self.service:
+            return (DRIVE_LOCAL / apto / archivo).read_bytes()
         from googleapiclient.http import MediaIoBaseDownload
-        pid = self._id_de(ruta)
-        fid = next(h['id'] for h in self._hijos(pid) if h['name'] == archivo)
+        pid = self._buscar(apto, self.raiz)
+        fid = self._buscar(archivo, pid)
         buf = io.BytesIO()
         bajada = MediaIoBaseDownload(buf, self.service.files().get_media(
             fileId=fid, supportsAllDrives=True))
@@ -130,16 +113,22 @@ class Drive:
         return buf.getvalue()
 
 
-RUTA_INDICE = f"{DIR_BUZON}/_indice.json"
+def _normalizar(apto: str) -> str:
+    """'8I' -> '8-I', 'PBA' -> 'PB-A'. Las carpetas de Drive no siempre traen
+    el guion con el que la app nombra los apartamentos."""
+    u = re.sub(r'[^A-Z0-9]', '', (apto or '').upper())
+    if not u:
+        return ''
+    if u.startswith('PB'):
+        return f"PB-{u[2:]}" if len(u) > 2 else u
+    return f"{u[0]}-{u[1:]}" if len(u) > 1 else u
 
 
 def _ya_propuesto() -> dict:
-    """Qué archivos de Drive ya se propusieron, y si se pudieron leer.
+    """Qué archivos ya se propusieron, y si se pudieron leer.
 
     Un índice y no abrir las propuestas una por una: con catorce en el buzón eso
-    eran catorce descargas cada noche, y una que tarde de más tumba la revisión
-    entera. Aquí solo escribe el detector, que corre una vez al día.
-
+    eran catorce descargas cada noche, y una que tarde de más tumba la revisión.
     Guarda si el archivo era legible para poder volver a proponerlo si alguien
     reemplaza un anexo escaneado por uno hecho en Excel.
     """
@@ -148,14 +137,14 @@ def _ya_propuesto() -> dict:
     except Exception:
         indice = None
     datos = (indice or {}).get('archivos') or {}
-    if isinstance(datos, list):          # formato viejo: solo nombres
-        return {a: False for a in datos}
-    return datos
+    return {k: bool(v) for k, v in datos.items()} if isinstance(datos, dict) \
+        else {a: False for a in datos}
 
 
 def _guardar_indice(vistos: dict):
-    utils._escribir_doc(RUTA_INDICE, {'archivos': vistos,
-                                      'actualizado': datetime.now().isoformat(timespec='seconds')})
+    utils._escribir_doc(RUTA_INDICE, {
+        'archivos': vistos,
+        'actualizado': datetime.now().isoformat(timespec='seconds')})
 
 
 def main() -> int:
@@ -165,78 +154,93 @@ def main() -> int:
     drive = Drive()
 
     proyecto = "riviera-park-2"
-    datos_app = utils.cargar_datos(proyecto)
-    sin_plan = {_normalizar(u) for u in datos_app['sin_plan']}
+    d = utils.cargar_datos(proyecto)
+    sin_plan = set(d['sin_plan'])
     # Quien fue retirado a propósito no "falta": sus papeles siguen en Drive y
     # sin esto el buzón propondría devolverlo al proyecto cada noche.
-    retirados = {_normalizar(r['unidad']) for r in utils.listar_retirados(proyecto)}
-    existen = {_normalizar(u) for u, _ in datos_app['clientes']} | retirados
-    # Un cliente marcado «sin plan de pagos» sí interesa para los anexos: ya
-    # está en la app pero le falta justo eso, y es lo que se viene a buscar.
+    retirados = {r['unidad'] for r in utils.listar_retirados(proyecto)}
+    existen = {u for u, _ in d['clientes']} | retirados
     con_plan = (existen - sin_plan) | retirados
 
     ya = _ya_propuesto()
-    nuevas = repetidas = 0
+    nuevas = repetidas = ilegibles = 0
 
-    for ruta, tipo in CARPETAS:
-        for archivo in drive.listar(ruta):
-            unidad, nombre = _del_nombre(archivo)
-            if not unidad:
-                continue
-            if unidad in (con_plan if tipo == "plan" else existen):
-                continue
-            visto = archivo in ya
-            # Un contrato ya avisado no se repite. Un anexo tampoco, salvo que
-            # antes fuera un escaneo: ahí hay que volver a leerlo por si lo
-            # reemplazaron por uno hecho en Excel, que sí trae cuotas.
-            if visto and (ya[archivo] or tipo != "plan"):
-                repetidas += 1
-                continue
+    for carpeta in drive.apartamentos():
+        apto = _normalizar(carpeta)
+        if not apto or apto in con_plan:
+            continue          # ya está con su plan: no hay nada que proponer
 
-            ext = archivo.rsplit('.', 1)[-1].lower()
-            datos = drive.bajar(ruta, archivo)
-            cuotas = utils.parsear_plan(datos, archivo) or [] if (tipo == "plan" and ext == 'pdf') else []
-            legible = bool(cuotas)
+        archivos = drive.archivos(carpeta)
+        anexos = [a for a in archivos if utils.clasificar_documento(a) == 'anexo']
+        if not anexos:
+            continue
 
-            if visto and not legible:
-                repetidas += 1       # sigue escaneado: ya se avisó en su día
+        # Sin anexo legible no se propone nada: hay que esperar a que suban uno
+        # hecho en Excel o exportado a PDF. Un escaneo no trae cuotas que leer,
+        # y proponerlo solo llena el buzón de cosas que no se pueden aprobar.
+        elegido = cuotas = datos = None
+        for archivo in anexos:
+            clave = f"{carpeta}/{archivo}"
+            if ya.get(clave):
+                continue      # ese anexo ya se propuso leído
+            crudo = drive.bajar(carpeta, archivo)
+            leidas = utils.parsear_plan(crudo, archivo) or []
+            if leidas:
+                elegido, cuotas, datos = archivo, leidas, crudo
+                break
+            ya[clave] = False
+            ilegibles += 1
+
+        if not elegido:
+            repetidas += sum(1 for a in anexos if f"{carpeta}/{a}" in ya and ya[f"{carpeta}/{a}"])
+            continue
+
+        nombre = (utils.extraer_datos_cliente(datos, elegido) or {}).get('nombre', '')
+        contrato = next((a for a in archivos
+                         if utils.clasificar_documento(a) == 'contrato'), None)
+
+        pid = datetime.now().strftime('%Y%m%d%H%M%S') + re.sub(r'\W', '', apto)
+        # Los documentos se guardan junto a la propuesta, no en la carpeta del
+        # cliente: hasta que alguien acepte, ese cliente no existe en la app.
+        adjuntos = {}
+        for etiqueta, archivo, crudo in [('anexo', elegido, datos),
+                                         ('contrato', contrato, None)]:
+            if not archivo:
                 continue
-
-            pid = datetime.now().strftime('%Y%m%d%H%M%S') + re.sub(r'\W', '', unidad)
-            # El documento se guarda junto a la propuesta, no en la carpeta del
-            # cliente: hasta que alguien acepte, ese cliente no existe en la app.
-            adjunto = f"{DIR_BUZON}/{pid}.{ext}"
+            crudo = crudo if crudo is not None else drive.bajar(carpeta, archivo)
+            ruta = f"{DIR_BUZON}/{pid}_{etiqueta}.{archivo.rsplit('.', 1)[-1].lower()}"
             sb.storage.from_(utils.BUCKET).upload(
-                adjunto, datos,
+                ruta, crudo,
                 file_options={"content-type": utils._mime(archivo),
                               "upsert": "true", "cache-control": "0"})
+            adjuntos[etiqueta] = {'ruta': ruta, 'archivo': archivo}
 
-            propuesta = {
-                'id': pid,
-                'adjunto': adjunto,
-                'proyecto': proyecto,
-                'unidad': unidad,
-                'nombre': nombre,
-                'tipo': tipo,
-                'archivo': archivo,
-                'origen': f"Drive: {ruta}",
-                'legible': legible,
-                'cuotas': [{'num_cuota': c.get('num_cuota'), 'desc': c.get('desc'),
-                            'fecha_venc': str(c.get('fecha_venc') or ''),
-                            'monto': float(c.get('monto') or 0)} for c in cuotas],
-                'total': round(sum(float(c.get('monto') or 0) for c in cuotas), 2),
-                'estado': 'pendiente',
-                'detectado': datetime.now().isoformat(timespec='seconds'),
-            }
-            utils._escribir_doc(f"{DIR_BUZON}/{pid}.json", propuesta)
-            ya[archivo] = legible
-            nuevas += 1
-            marca = f"{len(cuotas)} cuotas" if legible else "hay que cargarlo a mano"
-            print(f"  propuesta: {unidad} — {nombre} ({tipo}, {marca})", flush=True)
+        utils._escribir_doc(f"{DIR_BUZON}/{pid}.json", {
+            'id': pid,
+            'proyecto': proyecto,
+            'unidad': apto,
+            'nombre': (nombre or '').strip().upper(),
+            'carpeta': carpeta,
+            'adjuntos': adjuntos,
+            'archivo': elegido,
+            'origen': f"Drive: {CARPETA_APP}/{carpeta}",
+            'legible': True,
+            'cuotas': [{'num_cuota': c.get('num_cuota'), 'desc': c.get('desc'),
+                        'fecha_venc': str(c.get('fecha_venc') or ''),
+                        'monto': float(c.get('monto') or 0)} for c in cuotas],
+            'total': round(sum(float(c.get('monto') or 0) for c in cuotas), 2),
+            'estado': 'pendiente',
+            'detectado': datetime.now().isoformat(timespec='seconds'),
+        })
+        ya[f"{carpeta}/{elegido}"] = True
+        nuevas += 1
+        con = f" + contrato «{contrato}»" if contrato else " (sin contrato en la carpeta)"
+        print(f"  propuesta: {apto} — {len(cuotas)} cuotas, ${sum(float(c.get('monto') or 0) for c in cuotas):,.2f}"
+              f" — «{elegido}»{con}", flush=True)
 
-    if nuevas:
-        _guardar_indice(ya)
-    print(f"Revision lista. {nuevas} propuestas nuevas, {repetidas} ya estaban en el buzon.",
+    _guardar_indice(ya)
+    print(f"Revision lista. {nuevas} propuestas nuevas, {repetidas} ya estaban en el buzon, "
+          f"{ilegibles} anexos escaneados que no se pueden leer (se esperan en PDF o Excel).",
           flush=True)
     return 0
 
