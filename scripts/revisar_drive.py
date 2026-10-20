@@ -133,22 +133,28 @@ class Drive:
 RUTA_INDICE = f"{DIR_BUZON}/_indice.json"
 
 
-def _ya_propuesto() -> set:
-    """Qué archivos de Drive ya se propusieron alguna vez.
+def _ya_propuesto() -> dict:
+    """Qué archivos de Drive ya se propusieron, y si se pudieron leer.
 
     Un índice y no abrir las propuestas una por una: con catorce en el buzón eso
     eran catorce descargas cada noche, y una que tarde de más tumba la revisión
     entera. Aquí solo escribe el detector, que corre una vez al día.
+
+    Guarda si el archivo era legible para poder volver a proponerlo si alguien
+    reemplaza un anexo escaneado por uno hecho en Excel.
     """
     try:
         indice = utils._leer_doc(RUTA_INDICE)
     except Exception:
         indice = None
-    return set((indice or {}).get('archivos') or [])
+    datos = (indice or {}).get('archivos') or {}
+    if isinstance(datos, list):          # formato viejo: solo nombres
+        return {a: False for a in datos}
+    return datos
 
 
-def _guardar_indice(vistos: set):
-    utils._escribir_doc(RUTA_INDICE, {'archivos': sorted(vistos),
+def _guardar_indice(vistos: dict):
+    utils._escribir_doc(RUTA_INDICE, {'archivos': vistos,
                                       'actualizado': datetime.now().isoformat(timespec='seconds')})
 
 
@@ -159,38 +165,51 @@ def main() -> int:
     drive = Drive()
 
     proyecto = "riviera-park-2"
-    en_app = {_normalizar(u) for u, _ in utils.cargar_datos(proyecto)['clientes']}
+    datos_app = utils.cargar_datos(proyecto)
+    sin_plan = {_normalizar(u) for u in datos_app['sin_plan']}
     # Quien fue retirado a propósito no "falta": sus papeles siguen en Drive y
     # sin esto el buzón propondría devolverlo al proyecto cada noche.
-    en_app |= {_normalizar(r['unidad']) for r in utils.listar_retirados(proyecto)}
+    retirados = {_normalizar(r['unidad']) for r in utils.listar_retirados(proyecto)}
+    existen = {_normalizar(u) for u, _ in datos_app['clientes']} | retirados
+    # Un cliente marcado «sin plan de pagos» sí interesa para los anexos: ya
+    # está en la app pero le falta justo eso, y es lo que se viene a buscar.
+    con_plan = (existen - sin_plan) | retirados
+
     ya = _ya_propuesto()
     nuevas = repetidas = 0
 
     for ruta, tipo in CARPETAS:
         for archivo in drive.listar(ruta):
             unidad, nombre = _del_nombre(archivo)
-            if not unidad or unidad in en_app:
+            if not unidad:
                 continue
-            if archivo in ya:
+            if unidad in (con_plan if tipo == "plan" else existen):
+                continue
+            visto = archivo in ya
+            # Un contrato ya avisado no se repite. Un anexo tampoco, salvo que
+            # antes fuera un escaneo: ahí hay que volver a leerlo por si lo
+            # reemplazaron por uno hecho en Excel, que sí trae cuotas.
+            if visto and (ya[archivo] or tipo != "plan"):
                 repetidas += 1
                 continue
 
-            pid = datetime.now().strftime('%Y%m%d%H%M%S') + re.sub(r'\W', '', unidad)
+            ext = archivo.rsplit('.', 1)[-1].lower()
+            datos = drive.bajar(ruta, archivo)
+            cuotas = utils.parsear_plan(datos, archivo) or [] if (tipo == "plan" and ext == 'pdf') else []
+            legible = bool(cuotas)
 
+            if visto and not legible:
+                repetidas += 1       # sigue escaneado: ya se avisó en su día
+                continue
+
+            pid = datetime.now().strftime('%Y%m%d%H%M%S') + re.sub(r'\W', '', unidad)
             # El documento se guarda junto a la propuesta, no en la carpeta del
             # cliente: hasta que alguien acepte, ese cliente no existe en la app.
-            datos = drive.bajar(ruta, archivo)
-            ext = archivo.rsplit('.', 1)[-1].lower()
             adjunto = f"{DIR_BUZON}/{pid}.{ext}"
             sb.storage.from_(utils.BUCKET).upload(
                 adjunto, datos,
                 file_options={"content-type": utils._mime(archivo),
                               "upsert": "true", "cache-control": "0"})
-
-            cuotas = []
-            if tipo == "plan" and ext == 'pdf':
-                cuotas = utils.parsear_plan(datos, archivo) or []
-            legible = bool(cuotas)
 
             propuesta = {
                 'id': pid,
@@ -210,7 +229,7 @@ def main() -> int:
                 'detectado': datetime.now().isoformat(timespec='seconds'),
             }
             utils._escribir_doc(f"{DIR_BUZON}/{pid}.json", propuesta)
-            ya.add(archivo)
+            ya[archivo] = legible
             nuevas += 1
             marca = f"{len(cuotas)} cuotas" if legible else "hay que cargarlo a mano"
             print(f"  propuesta: {unidad} — {nombre} ({tipo}, {marca})", flush=True)
