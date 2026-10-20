@@ -130,20 +130,26 @@ class Drive:
         return buf.getvalue()
 
 
-def _ya_propuesto(sb) -> set:
-    """Archivos que ya tienen propuesta, para no repetirla cada noche."""
-    vistos = set()
+RUTA_INDICE = f"{DIR_BUZON}/_indice.json"
+
+
+def _ya_propuesto() -> set:
+    """Qué archivos de Drive ya se propusieron alguna vez.
+
+    Un índice y no abrir las propuestas una por una: con catorce en el buzón eso
+    eran catorce descargas cada noche, y una que tarde de más tumba la revisión
+    entera. Aquí solo escribe el detector, que corre una vez al día.
+    """
     try:
-        archivos = sb.storage.from_(utils.BUCKET).list(DIR_BUZON, {'limit': 1000}) or []
+        indice = utils._leer_doc(RUTA_INDICE)
     except Exception:
-        return vistos
-    for a in archivos:
-        if not (a.get('name') or '').endswith('.json'):
-            continue
-        p = utils._leer_doc(f"{DIR_BUZON}/{a['name']}")
-        if p:
-            vistos.add(p.get('archivo'))
-    return vistos
+        indice = None
+    return set((indice or {}).get('archivos') or [])
+
+
+def _guardar_indice(vistos: set):
+    utils._escribir_doc(RUTA_INDICE, {'archivos': sorted(vistos),
+                                      'actualizado': datetime.now().isoformat(timespec='seconds')})
 
 
 def main() -> int:
@@ -157,7 +163,7 @@ def main() -> int:
     # Quien fue retirado a propósito no "falta": sus papeles siguen en Drive y
     # sin esto el buzón propondría devolverlo al proyecto cada noche.
     en_app |= {_normalizar(r['unidad']) for r in utils.listar_retirados(proyecto)}
-    ya = _ya_propuesto(sb)
+    ya = _ya_propuesto()
     nuevas = repetidas = 0
 
     for ruta, tipo in CARPETAS:
@@ -193,10 +199,13 @@ def main() -> int:
                 'detectado': datetime.now().isoformat(timespec='seconds'),
             }
             utils._escribir_doc(f"{DIR_BUZON}/{pid}.json", propuesta)
+            ya.add(archivo)
             nuevas += 1
             marca = f"{len(cuotas)} cuotas" if legible else "hay que cargarlo a mano"
             print(f"  propuesta: {unidad} — {nombre} ({tipo}, {marca})", flush=True)
 
+    if nuevas:
+        _guardar_indice(ya)
     print(f"Revision lista. {nuevas} propuestas nuevas, {repetidas} ya estaban en el buzon.",
           flush=True)
     return 0

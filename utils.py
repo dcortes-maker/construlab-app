@@ -427,10 +427,17 @@ def _leer_doc(ruta: str):
     except Exception:
         return None
     sep = "&" if "?" in firmada else "?"
-    pedido = _url.Request(f"{firmada}{sep}cb={_time.time_ns()}",
-                          headers={"Cache-Control": "no-cache"})
-    with _url.urlopen(pedido, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+    ultimo = None
+    for intento in range(3):
+        pedido = _url.Request(f"{firmada}{sep}cb={_time.time_ns()}",
+                              headers={"Cache-Control": "no-cache"})
+        try:
+            with _url.urlopen(pedido, timeout=20) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as e:   # la red se cae a ratos; reintentar es más barato que fallar
+            ultimo = e
+            _time.sleep(1 + intento)
+    raise ultimo
 
 
 def _escribir_doc(ruta: str, data: dict):
@@ -588,9 +595,14 @@ def listar_buzon(proyecto: str = "", solo_pendientes: bool = True) -> list:
         return []
     out = []
     for a in archivos:
-        if not (a.get('name') or '').endswith('.json'):
+        nombre = a.get('name') or ''
+        # Los que empiezan por "_" son del sistema, como el índice del detector.
+        if not nombre.endswith('.json') or nombre.startswith('_'):
             continue
-        p = _leer_doc(f"{_DIR_BUZON}/{a['name']}")
+        try:
+            p = _leer_doc(f"{_DIR_BUZON}/{nombre}")
+        except Exception:
+            continue   # una propuesta ilegible no puede tumbar la pantalla entera
         if not p or p.get('proyecto') != proyecto:
             continue
         if solo_pendientes and p.get('estado') != 'pendiente':

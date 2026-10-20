@@ -137,7 +137,7 @@ class DriveAPIDestino:
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
             pageSize=10,
-        ).execute()
+        ).execute(num_retries=5)
         files = res.get("files") or []
         return files[0] if files else None
 
@@ -157,7 +157,7 @@ class DriveAPIDestino:
             },
             fields="id",
             supportsAllDrives=True,
-        ).execute()
+        ).execute(num_retries=5)
         self._carpetas[clave] = creado["id"]
         return creado["id"]
 
@@ -178,14 +178,14 @@ class DriveAPIDestino:
                 fileId=ya["id"],
                 media_body=media,
                 supportsAllDrives=True,
-            ).execute()
+            ).execute(num_retries=5)
         else:
             self.service.files().create(
                 body={"name": fname, "parents": [parent]},
                 media_body=media,
                 fields="id",
                 supportsAllDrives=True,
-            ).execute()
+            ).execute(num_retries=5)
         return "copiado"
 
     def anular_recibo(self, unidad: str, num: int) -> bool:
@@ -198,7 +198,7 @@ class DriveAPIDestino:
                 fileId=vivo["id"],
                 body={"name": f"{base}_ANULADO.pdf"},
                 supportsAllDrives=True,
-            ).execute()
+            ).execute(num_retries=5)
             return True
         return False
 
@@ -217,7 +217,7 @@ class DriveAPIDestino:
             media_body=media,
             fields="id",
             supportsAllDrives=True,
-        ).execute()
+        ).execute(num_retries=5)
 
 
 def _destino():

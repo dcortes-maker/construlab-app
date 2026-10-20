@@ -220,7 +220,7 @@ class DestinoAPI:
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
             pageSize=10,
-        ).execute()
+        ).execute(num_retries=5)
         archivos = res.get("files") or []
         return archivos[0] if archivos else None
 
@@ -239,7 +239,7 @@ class DestinoAPI:
                     },
                     fields="id",
                     supportsAllDrives=True,
-                ).execute()
+                ).execute(num_retries=5)
                 self._carpetas[clave] = creado["id"]
         return self._carpetas[clave]
 
@@ -270,14 +270,14 @@ class DestinoAPI:
         if ya:
             self.service.files().update(
                 fileId=ya["id"], media_body=media, supportsAllDrives=True
-            ).execute()
+            ).execute(num_retries=5)
         else:
             self.service.files().create(
                 body={"name": nombre, "parents": [parent]},
                 media_body=media,
                 fields="id",
                 supportsAllDrives=True,
-            ).execute()
+            ).execute(num_retries=5)
 
     def limpiar(self) -> int:
         res = self.service.files().list(
@@ -287,7 +287,7 @@ class DestinoAPI:
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
             pageSize=1000,
-        ).execute()
+        ).execute(num_retries=5)
         borradas = 0
         for carpeta in res.get("files") or []:
             if not _se_conserva(carpeta["name"]):
@@ -296,7 +296,7 @@ class DestinoAPI:
                 self.service.files().update(
                     fileId=carpeta["id"], body={"trashed": True},
                     supportsAllDrives=True,
-                ).execute()
+                ).execute(num_retries=5)
                 borradas += 1
         return borradas
 
