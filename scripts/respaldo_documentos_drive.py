@@ -44,19 +44,6 @@ DRIVE_RAIZ = Path(
 )
 DRIVE_LOCAL = DRIVE_RAIZ / CARPETA_APP
 SALTAR = {"sistema", "recibos"}
-LEEME = """# Riviera Par App de abonos
-
-Esta carpeta la llena el respaldo de la app. Es el espejo de lo que está en Supabase.
-
-Cada apartamento tiene su propia carpeta. Ahí están juntos:
-
-- el contrato (el nombre contiene «contrato» o «cpp»)
-- el anexo o plan de pagos
-- los recibos emitidos. Si un recibo se anula, el archivo pasa a llevar `_ANULADO`
-
-`CPP/` y `ABONOS DE CLIENTES/Plan de pagos/` se arman a mano. Esta copia no las toca.
-La app es la fuente de verdad: borrar un archivo aquí no lo borra en ConstruLab.
-"""
 
 
 def _credenciales_supabase():
@@ -117,11 +104,6 @@ class LocalDestino:
             vivo.rename(muerto)
             return True
         return False
-
-    def asegurar_leeme(self):
-        leeme = self.raiz / "LEEME.md"
-        if not leeme.exists():
-            leeme.write_text(LEEME, encoding="utf-8")
 
 
 class DriveAPIDestino:
@@ -208,23 +190,6 @@ class DriveAPIDestino:
             ).execute(num_retries=5)
             return True
         return False
-
-    def asegurar_leeme(self):
-        from googleapiclient.http import MediaIoBaseUpload
-
-        if self._buscar("LEEME.md", self.raiz_id):
-            return
-        media = MediaIoBaseUpload(
-            io.BytesIO(LEEME.encode("utf-8")),
-            mimetype="text/markdown",
-            resumable=False,
-        )
-        self.service.files().create(
-            body={"name": "LEEME.md", "parents": [self.raiz_id]},
-            media_body=media,
-            fields="id",
-            supportsAllDrives=True,
-        ).execute(num_retries=5)
 
 
 def _destino(carpeta: str = CARPETA_APP, raiz: str = DRIVE_FOLDER_ID):
@@ -330,7 +295,6 @@ def _respaldar(sb, destino, proyecto: str) -> None:
         if destino.anular_recibo(r.get("unidad") or "sin-unidad", r["num"]):
             renombrados += 1
 
-    destino.asegurar_leeme()
     print(
         "  listo.",
         f"contratos nuevos {copiados['contrato']} (ya estaban {iguales['contrato']}),",
