@@ -29,10 +29,12 @@ st.markdown("---")
 
 if not propuestas:
     st.success("No hay nada pendiente.")
-    st.caption("El robot revisa cada noche la carpeta «Riviera Par App de abonos». "
-               "Si encuentra el anexo de un apartamento que no tiene su plan cargado, "
-               "lo lee y lo deja aquí. Si el anexo está escaneado como foto no lo "
-               "propone: hay que subirlo en PDF hecho desde Excel, o el Excel mismo.")
+    st.caption("Cada noche se revisa la carpeta «Riviera Par App de abonos». Si "
+               "aparece el anexo de un apartamento que no tiene su plan cargado, se "
+               "lee y se deja aquí para aprobarlo. Sirve tanto un PDF como un Excel; "
+               "lo único que no se puede leer es un PDF que sea una foto escaneada, "
+               "porque por dentro no tiene texto. Esos se quedan esperando a que "
+               "suban el archivo original.")
     st.stop()
 
 ES_ADMIN = st.session_state.get('rol') == 'admin'

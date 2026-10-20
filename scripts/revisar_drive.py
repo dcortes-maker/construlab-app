@@ -175,9 +175,10 @@ def main() -> int:
         if not anexos:
             continue
 
-        # Sin anexo legible no se propone nada: hay que esperar a que suban uno
-        # hecho en Excel o exportado a PDF. Un escaneo no trae cuotas que leer,
-        # y proponerlo solo llena el buzón de cosas que no se pueden aprobar.
+        # Sin anexo legible no se propone nada. Sirve igual un PDF que un Excel;
+        # lo que no se puede leer es un PDF escaneado, que por dentro es una foto
+        # y no trae cuotas. Proponerlo solo llena el buzón de cosas que nadie
+        # puede aprobar.
         elegido = cuotas = datos = None
         for archivo in anexos:
             clave = f"{carpeta}/{archivo}"
@@ -240,7 +241,7 @@ def main() -> int:
 
     _guardar_indice(ya)
     print(f"Revision lista. {nuevas} propuestas nuevas, {repetidas} ya estaban en el buzon, "
-          f"{ilegibles} anexos escaneados que no se pueden leer (se esperan en PDF o Excel).",
+          f"{ilegibles} anexos escaneados sin texto que leer (falta el archivo original).",
           flush=True)
     return 0
 
