@@ -175,15 +175,26 @@ def main() -> int:
                 repetidas += 1
                 continue
 
-            cuotas, legible = [], False
-            if tipo == "plan" and archivo.lower().endswith('.pdf'):
-                datos = drive.bajar(ruta, archivo)
-                cuotas = utils.parsear_plan(datos, archivo) or []
-                legible = bool(cuotas)
-
             pid = datetime.now().strftime('%Y%m%d%H%M%S') + re.sub(r'\W', '', unidad)
+
+            # El documento se guarda junto a la propuesta, no en la carpeta del
+            # cliente: hasta que alguien acepte, ese cliente no existe en la app.
+            datos = drive.bajar(ruta, archivo)
+            ext = archivo.rsplit('.', 1)[-1].lower()
+            adjunto = f"{DIR_BUZON}/{pid}.{ext}"
+            sb.storage.from_(utils.BUCKET).upload(
+                adjunto, datos,
+                file_options={"content-type": utils._mime(archivo),
+                              "upsert": "true", "cache-control": "0"})
+
+            cuotas = []
+            if tipo == "plan" and ext == 'pdf':
+                cuotas = utils.parsear_plan(datos, archivo) or []
+            legible = bool(cuotas)
+
             propuesta = {
                 'id': pid,
+                'adjunto': adjunto,
                 'proyecto': proyecto,
                 'unidad': unidad,
                 'nombre': nombre,

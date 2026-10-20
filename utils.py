@@ -625,24 +625,55 @@ def _cerrar_propuesta(pid: str, estado: str, quien: str = ''):
 
 
 def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str = '') -> dict:
-    """Crea el plan de la propuesta y la marca aprobada."""
+    """Mete al cliente en la app: su documento y, si se pudo leer, su plan.
+
+    Sin cuotas el cliente igual entra, marcado «Plan de pagos pendiente» —así
+    figura ya en la app con su contrato guardado, y el plan se carga después.
+    """
     p = _leer_doc(f"{_DIR_BUZON}/{pid}.json")
     if not p:
         return {'ok': False, 'motivo': 'No encuentro esa propuesta.'}
-    if not p.get('cuotas'):
-        return {'ok': False, 'motivo': 'Esa propuesta no trae cuotas: hay que cargar el plan a mano.'}
 
     unidad = (unidad or p['unidad']).strip().upper()
     nombre = (nombre or p['nombre']).strip().upper()
-    filas = [{'num_cuota': c['num_cuota'], 'desc': c['desc'],
-              'fecha_venc': c.get('fecha_venc') or None, 'monto': c['monto']}
-             for c in p['cuotas']]
-    creadas = agregar_filas_plan_bulk(unidad, nombre, filas, p['proyecto'])
+
+    if p.get('cuotas'):
+        filas = [{'num_cuota': c['num_cuota'], 'desc': c['desc'],
+                  'fecha_venc': c.get('fecha_venc') or None, 'monto': c['monto']}
+                 for c in p['cuotas']]
+        creadas = agregar_filas_plan_bulk(unidad, nombre, filas, p['proyecto'])
+    else:
+        creadas = agregar_filas_plan_bulk(
+            unidad, nombre,
+            [{'num_cuota': 1, 'desc': '⚠ Plan de pagos pendiente', 'monto': 0.0}],
+            p['proyecto'])
+
+    # El documento pasa del buzón a la carpeta del cliente, con un nombre que
+    # clasificar_documento reconozca para que el respaldo nocturno lo copie.
+    guardado = ''
+    if p.get('adjunto'):
+        try:
+            ext = p['adjunto'].rsplit('.', 1)[-1]
+            prefijo = 'Contrato' if p.get('tipo') == 'contrato' else 'Plan_de_Pagos_anexo'
+            guardado = f"{prefijo}_{unidad.replace('/', '-')}.{ext}"
+            datos = _sb().storage.from_(BUCKET).download(p['adjunto'])
+            subir_adjunto(unidad, guardado, datos)
+            _sb().storage.from_(BUCKET).remove([p['adjunto']])
+        except Exception:
+            guardado = ''   # el cliente ya entró; el documento se puede subir a mano
+
     _cerrar_propuesta(pid, 'aprobada', quien)
-    return {'ok': True, 'unidad': unidad, 'nombre': nombre, 'creadas': creadas}
+    return {'ok': True, 'unidad': unidad, 'nombre': nombre,
+            'creadas': creadas, 'con_plan': bool(p.get('cuotas')), 'documento': guardado}
 
 
 def descartar_propuesta(pid: str, quien: str = '') -> bool:
+    p = _leer_doc(f"{_DIR_BUZON}/{pid}.json")
+    if p and p.get('adjunto'):
+        try:
+            _sb().storage.from_(BUCKET).remove([p['adjunto']])
+        except Exception:
+            pass
     return bool(_cerrar_propuesta(pid, 'descartada', quien))
 
 

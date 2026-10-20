@@ -73,10 +73,10 @@ if con_plan:
 
 # ─── Los que no se pueden leer ──────────────────────────────────────
 if sin_plan:
-    st.markdown("### ⚠️ Hay que cargarlos a mano")
-    st.caption("De estos no hay plan que leer: o su anexo está escaneado como foto, "
-               "o en Drive solo aparece el contrato. La app los detectó para que no se "
-               "queden olvidados.")
+    st.markdown("### 📄 Con contrato, sin plan de pagos todavía")
+    st.caption("Su documento está escaneado como foto, así que no hay cuotas que leer. "
+               "Al aceptarlos quedan creados en la app con su contrato guardado y la "
+               "alerta «Sin plan de pagos», para cargarles el plan después.")
 
     st.dataframe(
         pd.DataFrame([{
@@ -89,10 +89,28 @@ if sin_plan:
     )
 
     if ES_ADMIN:
-        with st.expander("Quitar uno de la lista"):
-            st.caption("Úsalo cuando ya lo cargaste a mano, o si ese cliente no va.")
-            op = {f"{p['unidad']} — {p['nombre']}": p['id'] for p in sin_plan}
-            sel = st.selectbox("¿Cuál quitas?", list(op.keys()), key="quitar")
-            if st.button("Quitar del buzón"):
-                descartar_propuesta(op[sel], st.session_state.get('nombre', ''))
+        st.markdown("#### Aceptar uno")
+        op = {f"{p['unidad']} — {p['nombre']}": p for p in sin_plan}
+        sel = st.selectbox("¿A quién aceptas?", list(op.keys()), key="aceptar_sp")
+        p = op[sel]
+
+        a, b = st.columns(2)
+        u = a.text_input("Apartamento", value=p['unidad'], key=f"su_{p['id']}")
+        n = b.text_input("Cliente", value=p['nombre'], key=f"sn_{p['id']}")
+        st.caption(f"Se creará **{u} — {n}** con su documento «{p['archivo']}» "
+                   f"y la alerta de plan pendiente.")
+
+        x, y = st.columns(2)
+        if x.button("✅ Aceptar y crear en la app", type="primary", key=f"sok_{p['id']}"):
+            res = aprobar_propuesta(p['id'], u, n, st.session_state.get('nombre', ''))
+            if res['ok']:
+                doc = f" Documento guardado como «{res['documento']}»." if res['documento'] else ""
+                st.success(f"{res['nombre']} creado en {res['unidad']}, "
+                           f"marcado sin plan de pagos.{doc}")
                 st.rerun()
+            else:
+                st.error(res['motivo'])
+        if y.button("Quitar del buzón", key=f"sno_{p['id']}",
+                    help="Úsalo si ese cliente no va, o si ya lo cargaste a mano."):
+            descartar_propuesta(p['id'], st.session_state.get('nombre', ''))
+            st.rerun()
