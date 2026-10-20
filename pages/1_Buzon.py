@@ -109,10 +109,17 @@ if con_plan:
                     if res['ok']:
                         msg = (f"Plan de {res['nombre']} creado en {res['unidad']} "
                                f"({res['creadas']} cuotas).")
-                        if res.get('reserva'):
-                            msg += (f" Su reserva de ${res['reserva']['monto']:,.2f} "
-                                    f"pasó al plan.")
-                        st.success(msg)
+                        mig = res.get('reserva') or {}
+                        if mig.get('ambiguo'):
+                            quienes = ', '.join(f"{x['nombre']} (${x['monto']:,.2f})"
+                                                for x in mig['ambiguo'])
+                            st.warning(f"{msg} Pero {res['unidad']} tiene más de una "
+                                       f"reserva ({quienes}) y no se pudo saber cuál "
+                                       f"es la suya. Ninguna se tocó: revísalas en Reservas.")
+                        else:
+                            if mig.get('monto'):
+                                msg += f" Su reserva de ${mig['monto']:,.2f} pasó al plan."
+                            st.success(msg)
                         st.rerun()
                     else:
                         st.error(res['motivo'])

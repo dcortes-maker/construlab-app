@@ -8,6 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 import io
 import json
+import re
 import secrets
 
 _PROYECTOS_DB = {
@@ -350,12 +351,15 @@ def guardar_reserva(nombre: str, unidad: str, monto: float, fecha, notas: str = 
     return res.data[0]['id']
 
 
-def migrar_reserva_a_plan(unidad: str, proyecto: str = "") -> dict:
+def migrar_reserva_a_plan(unidad: str, proyecto: str = "", nombre: str = "") -> dict:
     """Al cargar el plan de un cliente en reserva: marca la cuota "Reserva" como
     pagada con la fecha y el monto de la reserva, y borra el registro de reservas
     para que el dinero no quede contado dos veces.
 
-    Devuelve {} si la unidad no tenía reserva.
+    Devuelve {} si la unidad no tenía reserva, o {'ambiguo': ...} si hay varias
+    y no se puede saber cuál es: un mismo apartamento llega a tener reserva de
+    dos personas distintas cuando una se retira y no se borró la suya. Antes
+    tomaba la primera, que es como llevarle a un cliente el abono de otro.
     """
     sb  = _sb()
     proyecto = proyecto or _proyecto_db()
@@ -363,6 +367,24 @@ def migrar_reserva_a_plan(unidad: str, proyecto: str = "") -> dict:
             .eq('proyecto', proyecto).eq('unidad', unidad).execute().data
     if not res:
         return {}
+
+    if len(res) > 1:
+        # Por palabras y no por texto seguido: «ALBANIA RIOS» en el plan y
+        # «ALBANIA G. RIOS NIETO» en la reserva son la misma persona, pero una
+        # no está contenida en la otra. Hacen falta dos apellidos coincidentes
+        # y que nadie más empate: con dinero, en la duda no se toca nada.
+        def _palabras(txt):
+            return {p for p in re.findall(r'[A-ZÁÉÍÓÚÑ]{3,}', (txt or '').upper())}
+
+        mias = _palabras(nombre)
+        puntos = sorted(((len(mias & _palabras(x.get('nombre'))), x) for x in res),
+                        key=lambda t: t[0], reverse=True)
+        if not (puntos[0][0] >= 2 and puntos[0][0] > puntos[1][0]):
+            return {'ambiguo': [{'id': x['id'], 'nombre': x.get('nombre'),
+                                 'monto': float(x['monto']), 'fecha': x['fecha']}
+                                for x in res]}
+        res = [puntos[0][1]]
+
     r          = res[0]
     monto_res  = float(r['monto'])
     fecha_res  = _a_fecha(r['fecha']) or date.today()
@@ -650,7 +672,7 @@ def aprobar_propuesta(pid: str, unidad: str = '', nombre: str = '', quien: str =
         # Si ese apartamento tenía reserva, pasa al plan: si no, su abono se
         # contaría dos veces, una en Reservas y otra en los abonos del CPP.
         try:
-            migrada = migrar_reserva_a_plan(unidad, p['proyecto'])
+            migrada = migrar_reserva_a_plan(unidad, p['proyecto'], nombre)
         except Exception:
             migrada = None
     else:

@@ -33,6 +33,23 @@ if reservas:
     total = df['Monto ($)'].sum()
     st.markdown(f"**{len(reservas)} cliente(s) en reserva** · Total: **${total:,.2f}**")
 
+    # Dos personas con reserva del mismo apartamento: pasa cuando una se retira
+    # y no se borró la suya. Hay que resolverlo antes de cargarle el plan a
+    # ninguna, porque si no no se sabe de quién es el abono.
+    from collections import Counter
+    repetidos = [u for u, c in Counter(r['unidad'] for r in reservas).items() if c > 1]
+    if repetidos:
+        detalle = []
+        for u in repetidos:
+            quienes = ' y '.join(f"{r['nombre']} (${r['monto']:,.2f})"
+                                 for r in reservas if r['unidad'] == u)
+            detalle.append(f"**{u}**: {quienes}")
+        st.warning("Hay apartamentos con reserva de más de una persona: "
+                   + "; ".join(detalle)
+                   + ". Hasta resolverlo, al cargar su plan de pagos la app no va a "
+                     "tocar ninguna de las dos, para no asignarle a un cliente el "
+                     "abono de otro.")
+
     def color_row(row):
         return ['color:#f1f5f9'] * len(row)
 

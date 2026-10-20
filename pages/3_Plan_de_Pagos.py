@@ -427,14 +427,20 @@ if seccion == "📎 Cargar Plan de Pago":
                     agregar_filas_plan_bulk(unidad_prev, nombre_prev, filas_a_guardar)
                     # Si venía de reserva: marca la cuota "Reserva" como pagada
                     # y saca el registro de reservas (evita contar el dinero dos veces).
-                    mig = migrar_reserva_a_plan(unidad_prev)
+                    mig = migrar_reserva_a_plan(unidad_prev, nombre=nombre_prev)
                     fname_orig = st.session_state.get('pdf_fname', 'plan_de_pagos')
                     subir_adjunto(unidad_prev, f"Plan_de_Pagos_{fname_orig}",
                                   st.session_state['pdf_bytes'])
                     for k in ['pdf_filas','pdf_unidad','pdf_nombre','pdf_error','pdf_bytes','pdf_fname','pdf_det','pdf_det_de']:
                         st.session_state.pop(k, None)
                     msg_ok = f"✅ Plan de {nombre_prev} guardado correctamente."
-                    if mig:
+                    if mig.get('ambiguo'):
+                        quienes = ', '.join(f"{x['nombre']} (${x['monto']:,.2f})"
+                                            for x in mig['ambiguo'])
+                        msg_ok += (f" ⚠️ Ojo: {unidad_prev} tiene más de una reserva "
+                                   f"({quienes}) y no se pudo saber cuál es la suya. "
+                                   f"Ninguna se tocó: revísalas en Reservas.")
+                    elif mig:
                         msg_ok += (f" Su reserva de ${mig['monto']:,.2f} pasó a CPP"
                                    + (" y la cuota de Reserva quedó marcada como pagada."
                                       if mig['marcada'] else "."))
