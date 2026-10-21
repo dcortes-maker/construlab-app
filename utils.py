@@ -1479,8 +1479,8 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
     def _parse_fecha(txt):
         if txt is None: return None
         if isinstance(txt, (date_cls, datetime)):
-            d = txt.date() if isinstance(txt, datetime) else txt
-            return d.replace(day=_ultimo_dia(d.year, d.month))
+            # El anexo trae el día exacto: se respeta tal cual.
+            return txt.date() if isinstance(txt, datetime) else txt
         txt = str(txt).strip().lower()
         m = re.search(r'([a-z]{3})[- ](\d{2,4})', txt)
         if m:
@@ -1492,7 +1492,7 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
         if m2:
             d2, mo, yr = int(m2.group(1)), int(m2.group(2)), int(m2.group(3))
             if yr < 100: yr += 2000
-            try: return date_cls(yr, mo, _ultimo_dia(yr, mo))
+            try: return date_cls(yr, mo, min(d2, _ultimo_dia(yr, mo)))
             except: pass
         return None
 
@@ -1563,11 +1563,14 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
             desc_raw = cells[col_desc] if col_desc is not None and col_desc < len(cells) else ''
             if not desc_raw:
                 for c in cells:
-                    if c and not re.match(r'^[\d$.,/-]+$', c) and not re.match(r'^\d+$', c):
-                        desc_raw = c; break
+                    if not c or re.match(r'^[\d$.,/-]+$', c) or re.match(r'^\d+$', c):
+                        continue
+                    if _parse_fecha(c) or re.search(r'\d{1,4}[/-]\d{1,2}[/-]\d{1,4}', c):
+                        continue          # es la fecha de la cuota, no su concepto
+                    desc_raw = c; break
             desc    = _normalizar_desc(desc_raw)
             desc_ex = 'Gasto Legal' if col_ex is not None and 'legal' in (low[col_ex] if col_ex < len(low) else '') else 'Gasto Manejo'
-            desc_ab = desc if 'gasto' not in desc.lower() else 'Abono inicial'
+            desc_ab = desc if (desc and 'gasto' not in desc.lower()) else 'Abono inicial'
             if monto_ab and monto_ab > 0:
                 resultado.append({'num_cuota': num, 'desc': desc_ab, 'fecha_venc': fecha, 'monto': monto_ab})
             if monto_ex and monto_ex > 0:
@@ -1579,15 +1582,33 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
     if ext in ('xlsx', 'xls'):
         import openpyxl, pandas as pd
         wb_tmp = openpyxl.load_workbook(io.BytesIO(archivo_bytes), data_only=True)
+
+        # Se lee SOLO la hoja del anexo. Estos libros traen además la proforma,
+        # la nota de promoción, el subsidio y listas internas de fincas con
+        # cientos de filas numeradas y con precios. Si se leen todas juntas, el
+        # plan sale con montos que no tienen nada que ver con el cliente.
+        def _puntaje_anexo(sheet):
+            if 'anexo' in (sheet.title or '').strip().lower():
+                return 2
+            for row in sheet.iter_rows(min_row=1, max_row=40, values_only=True):
+                txt = ' '.join(str(v) for v in row if v is not None).upper()
+                if 'CONTROL DE PAGOS' in txt:
+                    return 1
+            return 0
+
+        hoja = max(wb_tmp.worksheets, key=_puntaje_anexo)
+        if not _puntaje_anexo(hoja):
+            hoja = wb_tmp.worksheets[0]
+
         fls = []
-        for sheet in wb_tmp.worksheets:
-            for row in sheet.iter_rows(values_only=True):
-                row = list(row)
-                if all(v is None or str(v).strip() == '' for v in row): continue
-                fls.append(row)
+        for row in hoja.iter_rows(values_only=True):
+            row = list(row)
+            if all(v is None or str(v).strip() == '' for v in row): continue
+            fls.append(row)
         resultado = _procesar_filas(fls)
         if resultado: return resultado
-        df_tmp = pd.read_excel(io.BytesIO(archivo_bytes), header=None)
+        df_tmp = pd.read_excel(io.BytesIO(archivo_bytes),
+                               sheet_name=hoja.title, header=None)
         return _procesar_filas(df_tmp.values.tolist())
 
     ROMANOS = ['I','II','III','IV','V','VI','VII','VIII','IX','X',
