@@ -1359,10 +1359,13 @@ def _draw_footer(c, M, avail, W, hoy):
 
 
 def extraer_datos_cliente(archivo_bytes, nombre_archivo: str) -> dict:
-    """Lee nombre y unidad del ANEXO (ambos formatos). Devuelve {} si no los halla."""
+    """Lee nombre y unidad del ANEXO (ambos formatos). Devuelve {} si no los halla.
+
+    No se exige que el archivo termine en .pdf: en Drive muchos anexos llegan
+    sin esa terminación en el nombre, y por eso antes se devolvía vacío y el
+    cliente quedaba sin nombre en el buzón.
+    """
     import re
-    if not str(nombre_archivo).lower().endswith('.pdf'):
-        return {}
     try:
         import pdfplumber
         with pdfplumber.open(io.BytesIO(archivo_bytes)) as pdf:
@@ -1374,10 +1377,17 @@ def extraer_datos_cliente(archivo_bytes, nombre_archivo: str) -> dict:
 
     out = {}
 
-    # Unidad: "Unidad 4-H – T1 – F1" (anexo nuevo) o "Unidad: 3-C" (anexo de tabla)
-    mu = re.search(r'Unidad:?\s*([A-Za-z]{0,2}\d{0,2}[A-Za-z]?[-–]?[A-Za-z0-9]+)', texto)
-    if mu:
-        out['unidad'] = mu.group(1).strip().upper().replace('–', '-')
+    # Villas escribe el lote de dos maneras: "Unidad VDB- 330" y
+    # "Nro Casa (Unidad) 307". En la app el lote es solo el número.
+    mv = (re.search(r'Unidad\)?:?\s*VDB\s*[-–]?\s*(\d+)', texto, re.I)
+          or re.search(r'Nro\s*Casa\s*\(Unidad\)\s*(\d+)', texto, re.I))
+    if mv:
+        out['unidad'] = mv.group(1)
+    else:
+        # Riviera: "Unidad 4-H – T1 – F1" o "Unidad: 3-C"
+        mu = re.search(r'Unidad:?\s*([A-Za-z]{0,2}\d{0,2}[A-Za-z]?[-–]?[A-Za-z0-9]+)', texto)
+        if mu:
+            out['unidad'] = mu.group(1).strip().upper().replace('–', '-')
 
     # Nombre del comprador, en sus distintas variantes
     for patron in (r'Comprador\s*1\s+(.+?)\s+(?:Tel[eé]fono|C[eé]dula|Email)',
@@ -1394,6 +1404,65 @@ def extraer_datos_cliente(archivo_bytes, nombre_archivo: str) -> dict:
 
 
 # ─── parsear_plan — sin cambios (procesa archivos subidos) ─────────
+
+_ROMANOS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+            "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"]
+
+
+def _anexo_terrabona(texto: str) -> list:
+    """Lee el anexo con el formato de Grupo Terrabona (Villas y Riviera).
+
+    Trae la reserva, los pagos numerados, y al final los gastos legales y de
+    manejo. Dos detalles que no son obvios en el papel:
+
+    - Las fechas vienen en mm/dd/aaaa.
+    - Si al lado de los gastos legales las observaciones dicen que son gratis,
+      no entran al plan: el cliente no los va a pagar. Los de manejo sí entran
+      siempre.
+
+    Gastos legales y manejo no traen fecha, así que van como última cuota.
+    """
+    import re
+    from datetime import datetime as dt
+
+    def _fecha(txt):
+        try:
+            return dt.strptime(txt.strip(), "%m/%d/%Y").date()
+        except ValueError:
+            return None
+
+    def _monto(txt):
+        return float(re.sub(r"[^\d.]", "", txt.replace(",", "")))
+
+    filas = []
+    m = re.search(r"Fecha de reserva\s+(\d{2}/\d{2}/\d{4}).*?Monto de reserva\s*B/\.\s*([\d,.]+)",
+                  texto, re.S)
+    if m:
+        filas.append({"desc": "Reserva", "fecha_venc": _fecha(m.group(1)),
+                      "monto": _monto(m.group(2))})
+
+    for n, f, mt in re.findall(
+            r"Fecha Pago\s+(\d+)\s+(\d{2}/\d{2}/\d{4}).*?Monto Pago\s+\1\s*B/\.\s*([\d,.]+)", texto):
+        i = int(n)
+        filas.append({"desc": f"{_ROMANOS[i-1]} Pago" if i <= len(_ROMANOS) else "Otro",
+                      "fecha_venc": _fecha(f), "monto": _monto(mt)})
+
+    if not filas:
+        return []
+
+    obs = (re.search(r"Observaciones\s+(.+)", texto) or [None, ""])[1].lower()
+    legales = re.search(r"Gastos legales\s*B/\.\s*([\d,.]+)", texto)
+    if legales and "gratis" not in obs:
+        filas.append({"desc": "Gasto Legal", "fecha_venc": None, "monto": _monto(legales.group(1))})
+
+    manejo = re.search(r"Gastos de Manejo\s*B/\.\s*([\d,.]+)", texto)
+    if manejo:
+        filas.append({"desc": "Gasto Manejo", "fecha_venc": None, "monto": _monto(manejo.group(1))})
+
+    for i, f in enumerate(filas, 1):
+        f["num_cuota"] = i
+    return [f for f in filas if f["monto"] > 0]
+
 
 def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
     import re
@@ -1586,6 +1655,11 @@ def parsear_plan(archivo_bytes, nombre_archivo: str, _debug=False) -> list:
                 for tabla in page.extract_tables():
                     fls.extend(tabla)
                 texto_pdf += (page.extract_text() or '') + '\n'
+            # El anexo de Terrabona va primero: no es una tabla, son pares
+            # «Fecha Pago N / Monto Pago N», y el lector de tablas saca de ahí
+            # un plan incompleto y con los gastos legales que no tocaban.
+            resultado = _anexo_terrabona(texto_pdf)
+            if resultado: return resultado
             resultado = _procesar_filas(fls)
             if resultado: return resultado
             resultado = _parsear_anexo(texto_pdf)

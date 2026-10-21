@@ -160,6 +160,31 @@ class Drive:
         return buf.getvalue()
 
 
+def _extension(archivo: str) -> str:
+    """Terminación del archivo, o 'pdf' si no trae una usable.
+
+    En Drive muchos nombres llegan sin `.pdf` —«Anexo - SULEIDIS ITSEL MONTILLA
+    RÍOS»— y partir por el punto devolvía el nombre entero como extensión, con
+    espacios y tildes: el bucket rechaza esa ruta y la revisión se cae.
+    """
+    cola = archivo.rsplit('.', 1)[-1].lower() if '.' in archivo else ''
+    return cola if re.fullmatch(r'[a-z0-9]{1,5}', cola) else 'pdf'
+
+
+def _nombre_del_archivo(archivo: str) -> str:
+    """«Anexo - SULEIDIS ITSEL MONTILLA RÍOS.pdf» -> «SULEIDIS ITSEL MONTILLA RÍOS».
+
+    Muchos anexos no llevan el nombre del cliente dentro en un formato que se
+    pueda leer, pero sí en el nombre del archivo. Es una propuesta: quien la
+    aprueba lo ve y lo corrige si hace falta.
+    """
+    base = re.sub(r'\.[A-Za-z0-9]{1,5}$', '', archivo).strip()
+    m = re.search(r'[-–]\s*(.+)$', base)
+    cand = (m.group(1) if m else '').strip()
+    # Solo letras y espacios: descarta códigos como «T.177185» o «1. CPP AC»
+    return cand.upper() if re.fullmatch(r"[A-Za-zÁÉÍÓÚÑáéíóúñ' ]{6,}", cand) else ''
+
+
 def _normalizar(apto: str) -> str:
     """'8I' -> '8-I', 'PBA' -> 'PB-A'. Las carpetas de Drive no siempre traen
     el guion con el que la app nombra los apartamentos de Riviera.
@@ -257,6 +282,8 @@ def _revisar(sb, drive, proyecto: str) -> int:
             continue
 
         nombre = (utils.extraer_datos_cliente(datos, elegido) or {}).get('nombre', '')
+        if not nombre:
+            nombre = _nombre_del_archivo(elegido)
         contrato = next((a for a in archivos
                          if utils.clasificar_documento(a) == 'contrato'), None)
 
@@ -269,7 +296,7 @@ def _revisar(sb, drive, proyecto: str) -> int:
             if not archivo:
                 continue
             crudo = crudo if crudo is not None else drive.bajar(carpeta, archivo)
-            ruta = f"{DIR_BUZON}/{pid}_{etiqueta}.{archivo.rsplit('.', 1)[-1].lower()}"
+            ruta = f"{DIR_BUZON}/{pid}_{etiqueta}.{_extension(archivo)}"
             sb.storage.from_(utils.BUCKET).upload(
                 ruta, crudo,
                 file_options={"content-type": utils._mime(archivo),
@@ -294,6 +321,7 @@ def _revisar(sb, drive, proyecto: str) -> int:
             'detectado': datetime.now().isoformat(timespec='seconds'),
         })
         ya[f"{carpeta}/{elegido}"] = True
+        _guardar_indice(ya)
         nuevas += 1
         con = f" + contrato «{contrato}»" if contrato else " (sin contrato en la carpeta)"
         print(f"  propuesta: {apto} — {len(cuotas)} cuotas, ${sum(float(c.get('monto') or 0) for c in cuotas):,.2f}"
